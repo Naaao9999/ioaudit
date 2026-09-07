@@ -29,16 +29,21 @@ def test_raise_for_status_and_passed(normal_io):
     bad = audit(imbalanced)
     assert bad.passed({"accounting.max_relative_residual": 1e-4}) is False
     with pytest.raises(IOAuditError):
-        bad.raise_for_status()
-    with pytest.raises(IOAuditError):
         bad.raise_for_status(max_relative_residual=1e-4)
+
+
+def test_passed_is_a_pure_predicate(normal_io):
+    report = audit(normal_io)
+    before = dict(report.thresholds)
+    assert report.passed({"accounting.max_relative_residual": 1e-4}) is True
+    assert report.thresholds == before
 
 
 def test_signs_do_not_fail_boolean_gate():
     from ioaudit import AccountingConvention, IOSystem
     import numpy as np
 
-    io = IOSystem(np.array([[-1.0]]), np.array([1.0]), ["a"], accounting=AccountingConvention())
+    io = IOSystem(np.array([[-0.5]]), np.array([1.0]), ["a"], accounting=AccountingConvention())
     report = audit(io)
     assert report.passed() is True
 

@@ -97,18 +97,9 @@ def input_hash(io: Any) -> str:
         "sectors": _canonical(io.sectors),
         "Y": _canonical(io.Y),
         "V": _canonical(io.V),
-        "imports": _canonical(getattr(io, "imports", None)),
-        "exports": _canonical(getattr(io, "exports", None)),
-        "employment": _canonical(getattr(io, "employment", None)),
-        "satellites": _canonical(getattr(io, "satellites", None)),
         "A_reference": _canonical(getattr(io, "A_reference", None)),
         "L_reference": _canonical(getattr(io, "L_reference", None)),
-        "external_inputs_by_user": _canonical(
-            getattr(io, "external_inputs_by_user", None)
-        ),
-        "input_adjustments_by_user": _canonical(
-            getattr(io, "input_adjustments_by_user", None)
-        ),
+        "input_adjustments": _canonical(getattr(io, "input_adjustments", None)),
         "trade": trade_payload,
         "metadata": _canonical(getattr(io, "metadata", None)),
         "accounting": _canonical(

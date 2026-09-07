@@ -10,8 +10,10 @@ def test_negative_signed_entries_are_informational():
         ["a", "b"],
         Y=np.array([[-1.0], [1.0]]),
         V=np.array([[-1.0, 1.0]]),
-        imports=np.array([-2.0, 0.0]),
-        exports=np.array([-3.0, 0.0]),
+        trade=TradeFlows(
+            international_imports=np.array([-2.0, 0.0]),
+            international_exports=np.array([-3.0, 0.0]),
+        ),
         accounting=AccountingConvention(),
     )
     report = audit(io)
@@ -20,7 +22,7 @@ def test_negative_signed_entries_are_informational():
     assert report.signs.negative_value_added.count == 1
     assert report.signs.negative_imports.count == 1
     assert report.signs.negative_exports.count == 1
-    assert report.signs.status == "PASS"
+    assert report.signs.status == "AVAILABLE"
 
 
 def test_negative_tradeflows_are_reported_and_list_y_is_safe():

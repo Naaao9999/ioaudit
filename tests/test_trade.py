@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
 
@@ -108,8 +109,8 @@ def test_combined_split_conflict_is_checked_even_when_scope_uses_other_component
     assert report.accounting.output_balance.status == "SKIPPED"
 
 
-def test_trade_source_legacy_conflict_is_reported():
-    report = audit(
+def test_legacy_trade_arguments_are_rejected():
+    with pytest.raises(TypeError):
         IOSystem(
             np.eye(1),
             np.array([1.0]),
@@ -120,9 +121,6 @@ def test_trade_source_legacy_conflict_is_reported():
             trade=TradeFlows(combined_inflows=np.array([0.0])),
             accounting=AccountingConvention(),
         )
-    )
-    assert report.structure.status == "FAIL"
-    assert report.accounting.output_balance.status == "SKIPPED"
 
 
 def test_total_label_is_reported_without_removal():

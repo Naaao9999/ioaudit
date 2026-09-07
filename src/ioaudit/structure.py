@@ -303,16 +303,12 @@ class StructureDiagnostics:
     normalized_y_labels_match: bool | None = None
     v_labels_match: bool | None = None
     normalized_v_labels_match: bool | None = None
-    external_inputs_by_user_labels_match: bool | None = None
-    normalized_external_inputs_by_user_labels_match: bool | None = None
-    input_adjustments_by_user_labels_match: bool | None = None
-    normalized_input_adjustments_by_user_labels_match: bool | None = None
+    input_adjustment_labels_match: bool | None = None
+    normalized_input_adjustment_labels_match: bool | None = None
     trade_labels_match: dict[str, bool | None] = field(default_factory=dict)
     normalized_trade_labels_match: dict[str, bool | None] = field(default_factory=dict)
     y_shape: str = SKIPPED
     v_shape: str = SKIPPED
-    a_reference_shape: str = SKIPPED
-    l_reference_shape: str = SKIPPED
     possible_total_rows: list[dict[str, Any]] = field(default_factory=list)
     possible_total_columns: list[dict[str, Any]] = field(default_factory=list)
     possible_total_vector: list[dict[str, Any]] = field(default_factory=list)
@@ -323,10 +319,6 @@ class StructureDiagnostics:
     duplicate_labels_after_normalization: list[dict[str, Any]] = field(default_factory=list)
     trade_representation_conflicts: list[str] = field(default_factory=list)
     trade_shape: dict[str, str] = field(default_factory=dict)
-    auxiliary_status: str = SKIPPED
-    auxiliary_non_numeric_fields: list[str] = field(default_factory=list)
-    auxiliary_nan_fields: list[str] = field(default_factory=list)
-    auxiliary_inf_fields: list[str] = field(default_factory=list)
     n_rows: int | None = None
     n_columns: int | None = None
     details: dict[str, Any] = field(default_factory=dict)
@@ -520,7 +512,6 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     finite_fields_seen = False
     nan_fields: list[str] = []
     inf_fields: list[str] = []
-    auxiliary_fields_seen = False
     if z_numeric is not None and len(z_numeric.shape) == 2:
         arrays["Z"] = z_numeric
         finite_fields_seen = True
@@ -553,13 +544,9 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         if x_inf:
             inf_fields.append("x")
 
-    # Inspect table components that may participate in accounting.  A
-    # malformed optional component is reported and makes the affected
-    # structure check fail because the table-level calculation is unsafe.
-    # References are optional validation targets, not part of the core table
-    # structure.  Their parsing and numeric validity are reported by
-    # ``reference.py`` so a malformed reference cannot stop the core audit.
-    for field_name in ("Y", "V", "imports", "exports"):
+    # Inspect table components that participate in accounting.  References
+    # are optional validation targets and are diagnosed by ``reference.py``.
+    for field_name in ("Y", "V"):
         value = getattr(io, field_name)
         if value is None:
             continue
@@ -575,25 +562,6 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
                 nan_fields.append(field_name)
             if field_inf:
                 inf_fields.append(field_name)
-    # Employment and satellites are auxiliary observations.  Keep their
-    # diagnostics visible, but do not let them invalidate the core Z/x/Y/V/
-    # trade structure or stop dependent calculations.
-    for field_name in ("employment", "satellites"):
-        value = getattr(io, field_name)
-        if value is None:
-            continue
-        auxiliary_fields_seen = True
-        field_array, field_bad = _numeric_array(value)
-        if field_bad:
-            result.auxiliary_non_numeric_fields.append(field_name)
-            result.details[f"{field_name}_non_numeric_locations"] = field_bad
-            continue
-        if field_array is not None:
-            field_nan, field_inf = _nonfinite_flags(field_array)
-            if field_nan:
-                result.auxiliary_nan_fields.append(field_name)
-            if field_inf:
-                result.auxiliary_inf_fields.append(field_name)
     trade = getattr(io, "trade", None)
     if trade is not None:
         result.trade_representation_conflicts = list(trade.representation_conflicts)
@@ -634,8 +602,6 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
                     nan_fields.append(qualified_name)
                 if field_inf:
                     inf_fields.append(qualified_name)
-        if getattr(io, "_trade_explicit", False) and getattr(io, "_legacy_trade_fields_supplied", False):
-            result.details["trade_source_conflict"] = "trade and legacy imports/exports were supplied together"
     result.non_numeric = bool(non_numeric_fields)
     result.details["non_numeric_fields"] = non_numeric_fields
     result.nan_exists = bool(nan_fields) if finite_fields_seen else None
@@ -644,23 +610,6 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.details["nan_fields"] = nan_fields
     if inf_fields:
         result.details["inf_fields"] = inf_fields
-    result.details["auxiliary_non_numeric_fields"] = list(
-        result.auxiliary_non_numeric_fields
-    )
-    if result.auxiliary_nan_fields:
-        result.details["auxiliary_nan_fields"] = list(result.auxiliary_nan_fields)
-    if result.auxiliary_inf_fields:
-        result.details["auxiliary_inf_fields"] = list(result.auxiliary_inf_fields)
-    result.auxiliary_status = (
-        FAIL
-        if (
-            result.auxiliary_non_numeric_fields
-            or result.auxiliary_nan_fields
-            or result.auxiliary_inf_fields
-        )
-        else (PASS if auxiliary_fields_seen else SKIPPED)
-    )
-
     result.sectors_length_matches = (
         PASS if result.n_rows is not None and len(io.sectors) == result.n_rows else FAIL
     )
@@ -710,18 +659,18 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         if v_sector_labels is not None and expected_sector_labels is not None
         else None
     )
-    for field_name in ("external_inputs_by_user", "input_adjustments_by_user"):
-        value = getattr(io, field_name, None)
-        if value is None or expected_sector_labels is None:
-            continue
+    value = getattr(io, "input_adjustments", None)
+    if value is not None and expected_sector_labels is not None:
         field_index, field_columns = _labels(value)
         # For an (m, n) adjustment matrix, columns identify purchasing
         # sectors.  For a one-dimensional Series, its index does so.
         sector_labels = field_columns if field_columns is not None else field_index
-        exact = _same_labels(sector_labels, expected_sector_labels)
-        normalized = _same_normalized_labels(sector_labels, expected_sector_labels)
-        setattr(result, f"{field_name}_labels_match", exact)
-        setattr(result, f"normalized_{field_name}_labels_match", normalized)
+        result.input_adjustment_labels_match = _same_labels(
+            sector_labels, expected_sector_labels
+        )
+        result.normalized_input_adjustment_labels_match = _same_normalized_labels(
+            sector_labels, expected_sector_labels
+        )
     exact_label_checks = [
         value
         for value in (
@@ -729,8 +678,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
             result.x_labels_match,
             result.y_labels_match,
             result.v_labels_match,
-            result.external_inputs_by_user_labels_match,
-            result.input_adjustments_by_user_labels_match,
+            result.input_adjustment_labels_match,
             *result.trade_labels_match.values(),
         )
         if value is not None
@@ -742,8 +690,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
             result.normalized_x_labels_match,
             result.normalized_y_labels_match,
             result.normalized_v_labels_match,
-            result.normalized_external_inputs_by_user_labels_match,
-            result.normalized_input_adjustments_by_user_labels_match,
+            result.normalized_input_adjustment_labels_match,
             *result.normalized_trade_labels_match.values(),
         )
         if value is not None
@@ -778,17 +725,16 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     result.duplicate_labels_after_normalization.extend(
         _duplicate_normalized_labels(v_columns, "V.columns")
     )
-    for field_name in ("external_inputs_by_user", "input_adjustments_by_user"):
-        value = getattr(io, field_name, None)
-        field_index, field_columns = _labels(value)
-        if field_columns is not None:
-            result.duplicate_labels_after_normalization.extend(
-                _duplicate_normalized_labels(field_columns, f"{field_name}.columns")
-            )
-        elif field_index is not None:
-            result.duplicate_labels_after_normalization.extend(
-                _duplicate_normalized_labels(field_index, f"{field_name}.index")
-            )
+    value = getattr(io, "input_adjustments", None)
+    field_index, field_columns = _labels(value)
+    if field_columns is not None:
+        result.duplicate_labels_after_normalization.extend(
+            _duplicate_normalized_labels(field_columns, "input_adjustments.columns")
+        )
+    elif field_index is not None:
+        result.duplicate_labels_after_normalization.extend(
+            _duplicate_normalized_labels(field_index, "input_adjustments.index")
+        )
     if len(z_shape) == 2:
         result.possible_total_rows = _total_candidates(
             io.Z, _dimension_labels(io, 0, z_shape[0]), axis=0
@@ -824,13 +770,9 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
                 result.v_shape = PASS if v_shape == (n,) or (len(v_shape) == 2 and v_shape[1] == n) else FAIL
             except Exception:
                 result.v_shape = FAIL
-        result.a_reference_shape = _shape_status(io.A_reference, ((n, n),))
-        result.l_reference_shape = _shape_status(io.L_reference, ((n, n),))
     else:
         result.y_shape = FAIL if io.Y is not None else SKIPPED
         result.v_shape = FAIL if io.V is not None else SKIPPED
-        result.a_reference_shape = FAIL if io.A_reference is not None else SKIPPED
-        result.l_reference_shape = FAIL if io.L_reference is not None else SKIPPED
 
     required_failures = [
         result.z_is_2d == FAIL,
@@ -846,18 +788,13 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.y_labels_match is False,
         result.v_labels_match is False,
         (
-            result.external_inputs_by_user_labels_match is False
-            and result.normalized_external_inputs_by_user_labels_match is not True
-        ),
-        (
-            result.input_adjustments_by_user_labels_match is False
-            and result.normalized_input_adjustments_by_user_labels_match is not True
+            result.input_adjustment_labels_match is False
+            and result.normalized_input_adjustment_labels_match is not True
         ),
         any(value is False for value in result.trade_labels_match.values()),
         result.y_shape == FAIL,
         result.v_shape == FAIL,
         bool(result.trade_representation_conflicts),
-        "trade_source_conflict" in result.details,
         any(status == FAIL for status in result.trade_shape.values()),
     ]
     result.status = FAIL if any(required_failures) else PASS

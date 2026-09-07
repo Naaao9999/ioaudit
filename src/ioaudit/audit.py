@@ -68,7 +68,7 @@ def audit(
     )
 
     components = diagnose_components(io)
-    zero_output = diagnose_zero_output(z, x, list(io.sectors), io.Y, io.V)
+    zero_structure = diagnose_zero_output(z, x, list(io.sectors), io.Y, io.V)
     accounting = diagnose_accounting(
         z,
         x,
@@ -103,10 +103,9 @@ def audit(
         warnings.append(
             "Y/V subtotal components may be double-counted; inspect report.components.double_count_risk"
         )
-    if (
-        getattr(scale, "status", None) == "AVAILABLE"
-        and getattr(scale, "cell_status", None) == "SKIPPED"
-    ):
+    if getattr(scale, "status", None) in {"AVAILABLE", "WARNING"} and getattr(
+        scale, "cell_status", None
+    ) == "SKIPPED":
         warnings.append(
             "cell scale diagnostics skipped: rounding context unavailable"
         )
@@ -116,20 +115,19 @@ def audit(
         warnings.append("exact duplicate rows or columns were found in Z")
     if structure.duplicate_labels_after_normalization:
         warnings.append("duplicate labels remain after Unicode/whitespace normalization")
-    for field_name in ("external_inputs_by_user", "input_adjustments_by_user"):
-        exact = getattr(structure, f"{field_name}_labels_match", None)
-        normalized = getattr(structure, f"normalized_{field_name}_labels_match", None)
-        if exact is False and normalized is True:
-            warnings.append(
-                f"{field_name} labels match sectors only after Unicode/whitespace normalization"
-            )
-    if zero_output.all_zero_rows_with_positive_output or zero_output.all_zero_columns_with_positive_output:
+    exact = getattr(structure, "input_adjustment_labels_match", None)
+    normalized = getattr(structure, "normalized_input_adjustment_labels_match", None)
+    if exact is False and normalized is True:
+        warnings.append(
+            "input_adjustments labels match sectors only after Unicode/whitespace normalization"
+        )
+    if zero_structure.all_zero_rows_with_positive_output or zero_structure.all_zero_columns_with_positive_output:
         warnings.append("Z contains all-zero rows or columns with positive output")
-    if zero_output.all_zero_rows_with_positive_final_demand:
+    if zero_structure.all_zero_rows_with_positive_final_demand:
         warnings.append("Z contains all-zero rows with positive final-demand evidence")
-    if zero_output.all_zero_columns_with_positive_value_added:
+    if zero_structure.all_zero_columns_with_positive_value_added:
         warnings.append("Z contains all-zero columns with positive value-added evidence")
-    if zero_output.isolated_sectors:
+    if zero_structure.isolated_sectors:
         warnings.append("isolated sectors were found from available Z/Y/V evidence")
     if orientation.possible_transpose is None:
         warnings.append("possible_transpose is indeterminate from available evidence")
@@ -137,18 +135,13 @@ def audit(
         warnings.append(stability.reason)
     if structure.status == "FAIL":
         errors.append("structural validation failed; dependent calculations may be SKIPPED")
-    if getattr(structure, "auxiliary_status", None) == "FAIL":
-        warnings.append(
-            "auxiliary data validation reported issues; inspect "
-            "report.structure.auxiliary_*"
-        )
 
     return AuditReport(
         structure=structure,
         orientation=orientation,
         accounting=accounting,
         signs=signs,
-        zero_output=zero_output,
+        zero_structure=zero_structure,
         coefficients=coefficients,
         stability=stability,
         reference=reference,

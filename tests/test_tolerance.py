@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ioaudit import AccountingConvention, IOAuditError, IOSystem, audit
+from ioaudit import AccountingConvention, IOAuditError, IOSystem, TradeFlows, audit
 
 
 def _io_with_output_residual(residual):
@@ -11,7 +11,7 @@ def _io_with_output_residual(residual):
         ["A", "B"],
         Y=np.array([5.0 + residual, 5.0]),
         V=np.array([5.0, 5.0]),
-        imports=np.zeros(2),
+        trade=TradeFlows(international_imports=np.zeros(2)),
         accounting=AccountingConvention.domestic_competitive(
             inflow_sign="negative",
             trade_representation="outflows_in_Y",
@@ -27,7 +27,8 @@ def test_rounding_aware_accounting_marks_small_nonzero_residual():
         _io_with_output_residual(0.5),
         accounting_tolerance={"absolute": 1.0, "relative": 0.0, "rounding_unit": 1.0},
     )
-    assert report.accounting.output_balance.status == "ROUNDING_LEVEL"
+    assert report.accounting.output_balance.status == "PASS"
+    assert report.accounting.output_balance.residual_class == "rounding_level"
     assert report.passed() is True
     assert report.accounting.tolerance["rounding_unit"] == 1.0
     report.raise_for_status()
@@ -71,7 +72,8 @@ def test_scale_ignores_residuals_inside_declared_rounding_envelope():
             "rounding_unit": 1.0,
         },
     )
-    assert report.accounting.output_balance.status == "ROUNDING_LEVEL"
+    assert report.accounting.output_balance.status == "PASS"
+    assert report.accounting.output_balance.residual_class == "rounding_level"
     assert report.accounting.output_balance.max_absolute_residual == 0.5
     assert report.scale.rounding_context_available is True
     assert report.scale.possible_global_scale_mismatches == []

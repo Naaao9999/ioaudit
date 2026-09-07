@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .accounting import _axis_sum, _vector
+from ._balance_core import axis_sum as _axis_sum, vector as _vector
 from .structure import (
     _all_finite,
     _as_array,
@@ -702,7 +702,7 @@ def diagnose_scale(
     ) + _robust_outliers(
         _evidence_residual(input_residual, x_array, tolerance), "input", sectors
     )
-    result.status = "AVAILABLE"
+    result.status = "WARNING" if result.total_candidates else "AVAILABLE"
     return result
 
 

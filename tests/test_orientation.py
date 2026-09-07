@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from ioaudit import AccountingConvention, IOSystem, audit
+from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
 
 
 def test_labels_and_alignment():
@@ -19,9 +19,22 @@ def test_transposed_table_detectable():
     z = np.array([[2.0, 1.0], [4.0, 3.0]])
     x = np.array([10.0, 10.0])
     y = np.array([4.0, 6.0])
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, imports=np.zeros(2), accounting=AccountingConvention.domestic_competitive(
-        inflow_sign="negative", trade_representation="outflows_in_Y", external_flow_scope="international",
-        outflow_sign="positive", input_representation="complete")))
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=y,
+            trade=TradeFlows(international_imports=np.zeros(2)),
+            accounting=AccountingConvention.domestic_competitive(
+                inflow_sign="negative",
+                trade_representation="outflows_in_Y",
+                external_flow_scope="international",
+                outflow_sign="positive",
+                input_representation="complete",
+            ),
+        )
+    )
     assert report.orientation.possible_transpose is True
 
 
@@ -49,7 +62,7 @@ def test_orientation_uses_declared_input_adjustments():
             ["a", "b"],
             Y=np.array([5.0, 2.0]),
             V=np.array([1.0, 2.0]),
-            input_adjustments_by_user=np.array([1.0, 3.0]),
+            input_adjustments=np.array([1.0, 3.0]),
             accounting=convention,
         )
     )
