@@ -50,12 +50,21 @@ def _dense_distribution(values: np.ndarray) -> dict[str, float | int | None]:
     finite = values[np.isfinite(values)]
     if not finite.size:
         return _empty_distribution()
+    scale = float(np.max(np.abs(finite)))
+    if scale == 0.0:
+        mean = 0.0
+        std = 0.0
+    else:
+        scaled = finite / scale
+        with np.errstate(over="ignore", invalid="ignore"):
+            mean = float(scale * np.mean(scaled))
+            std = float(scale * np.std(scaled))
     return {
         "count": int(finite.size),
         "min": float(np.min(finite)),
         "max": float(np.max(finite)),
-        "mean": float(np.mean(finite)),
-        "std": float(np.std(finite)),
+        "mean": mean,
+        "std": std,
         "median": float(np.median(finite)),
         "p01": float(np.quantile(finite, 0.01)),
         "p99": float(np.quantile(finite, 0.99)),
@@ -91,10 +100,20 @@ def _sparse_distribution(matrix: Any) -> dict[str, float | int | None]:
     nonzero = data[data != 0]
     if total == 0:
         return _empty_distribution()
-    total_sum = float(np.sum(data))
-    total_sq = float(np.sum(data * data))
-    mean = total_sum / total
-    variance = max(0.0, total_sq / total - mean * mean)
+    scale = float(np.max(np.abs(data))) if data.size else 0.0
+    if scale == 0.0:
+        mean = 0.0
+        std = 0.0
+    else:
+        scaled = data / scale
+        mean_scaled = float(np.sum(scaled) / total)
+        variance_scaled = max(
+            0.0,
+            float(np.sum(scaled * scaled) / total) - mean_scaled * mean_scaled,
+        )
+        with np.errstate(over="ignore", invalid="ignore"):
+            mean = float(scale * mean_scaled)
+            std = float(scale * np.sqrt(variance_scaled))
     minimum = min(0.0, float(np.min(nonzero))) if nonzero.size else 0.0
     maximum = max(0.0, float(np.max(nonzero))) if nonzero.size else 0.0
     return {
@@ -102,7 +121,7 @@ def _sparse_distribution(matrix: Any) -> dict[str, float | int | None]:
         "min": minimum,
         "max": maximum,
         "mean": mean,
-        "std": float(np.sqrt(variance)),
+        "std": std,
         "median": _sparse_quantile(nonzero, total, 0.5),
         "p01": _sparse_quantile(nonzero, total, 0.01),
         "p99": _sparse_quantile(nonzero, total, 0.99),

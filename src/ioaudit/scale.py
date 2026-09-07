@@ -12,7 +12,9 @@ from typing import Any
 
 import numpy as np
 
+from ._accounting_plan import AccountingPlan
 from ._balance_core import axis_sum as _axis_sum, vector as _vector
+from ._residuals import PlanResiduals, evaluate_residual
 from .structure import (
     _all_finite,
     _as_array,
@@ -107,18 +109,7 @@ def _evidence_residual(
 
     if residual is None:
         return None
-    values = np.asarray(residual, dtype=float)
-    if tolerance is None:
-        return values.copy()
-    allowed = np.maximum.reduce(
-        (
-            np.full_like(values, float(tolerance.get("absolute", 0.0))),
-            float(tolerance.get("relative", 0.0)) * np.abs(x),
-            np.full_like(values, float(tolerance.get("rounding_unit", 0.0))),
-        )
-    )
-    excess = np.maximum(np.abs(values) - allowed, 0.0)
-    return np.copysign(excess, values)
+    return evaluate_residual(residual, x, tolerance).excess
 
 
 def _improvement(before: float, after: float) -> float | None:
@@ -626,6 +617,8 @@ def diagnose_scale(
     factors: tuple[float, ...] = DEFAULT_SCALE_FACTORS,
     *,
     reference_diagnostics: Any = None,
+    plan: AccountingPlan | None = None,
+    baseline: PlanResiduals | None = None,
 ) -> ScaleDiagnostics:
     """Find scale factors that materially reduce declared balance residuals."""
 
@@ -647,8 +640,12 @@ def diagnose_scale(
         result.reason = "AccountingConvention was not supplied"
         return result
 
-    input_residual = _balance_residual(getattr(accounting, "input_balance", None))
-    output_residual = _balance_residual(getattr(accounting, "output_balance", None))
+    if baseline is None:
+        input_residual = _balance_residual(getattr(accounting, "input_balance", None))
+        output_residual = _balance_residual(getattr(accounting, "output_balance", None))
+    else:
+        input_residual = baseline.input
+        output_residual = baseline.output
     if input_residual is None and output_residual is None:
         result.reason = "no auditable accounting residual was available"
         return result
@@ -666,18 +663,22 @@ def diagnose_scale(
     try:
         row_sum = _axis_sum(z, 1)
         column_sum = _axis_sum(z, 0)
-        f, _ = _vector(
-            getattr(io, "Y", None),
-            expected="Y",
-            n=z_shape[0],
-            sectors=sectors,
-        )
-        v, _ = _vector(
-            getattr(io, "V", None),
-            expected="V",
-            n=z_shape[0],
-            sectors=sectors,
-        )
+        if plan is None:
+            f, _ = _vector(
+                getattr(io, "Y", None),
+                expected="Y",
+                n=z_shape[0],
+                sectors=sectors,
+            )
+            v, _ = _vector(
+                getattr(io, "V", None),
+                expected="V",
+                n=z_shape[0],
+                sectors=sectors,
+            )
+        else:
+            f = plan.y
+            v = plan.v
     except (TypeError, ValueError, FloatingPointError) as exc:
         result.reason = f"scale diagnostics could not read accounting fields: {exc}"
         return result

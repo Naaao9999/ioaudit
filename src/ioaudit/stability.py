@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import warnings
 
 import numpy as np
 from scipy import sparse
@@ -67,8 +68,29 @@ def _iterative_spectral_radius(a: Any) -> tuple[float | None, bool]:
         return _dense_spectral_radius(np.asarray(a, dtype=float)), True
     try:
         matrix = a if _is_sparse(a) else sparse.csr_matrix(a)
-        values = spla.eigs(matrix.tocsr(), k=1, which="LM", return_eigenvectors=False)
-        return float(np.max(np.abs(values))), False
+        matrix = matrix.tocsr().astype(float, copy=True)
+        scale = float(np.max(np.abs(matrix.data))) if matrix.nnz else 0.0
+        if scale == 0.0:
+            return 0.0, False
+        # After rescaling, ARPACK's absolute eigenvalue error is rescaled by
+        # the same factor.  Once one machine epsilon in the normalized solve
+        # exceeds one unit in the original scale, a finite estimate can be
+        # materially misleading, so report it as unavailable.
+        if np.finfo(float).eps * scale > 1.0:
+            return None, False
+        # ARPACK first normalizes internally, but doing this explicitly avoids
+        # overflow in its norm calculations for finite matrices with very
+        # large IO values.  Eigenvalues are restored after the solve.
+        values = spla.eigs(
+            matrix / scale,
+            k=1,
+            which="LM",
+            return_eigenvectors=False,
+        )
+        spectral_radius = float(np.max(np.abs(values))) * scale
+        if not np.isfinite(spectral_radius):
+            return None, False
+        return spectral_radius, False
     except Exception:
         # Power iteration is not a reliable spectral-radius algorithm for a
         # general IO coefficient matrix: it can converge to a singular value
@@ -88,7 +110,7 @@ def _negative_entries(matrix: np.ndarray) -> dict[str, Any]:
 
 def _iterative_condition_and_solve(
     b: Any,
-) -> tuple[bool, float | None, np.ndarray | None, str | None]:
+) -> tuple[bool, float | None, np.ndarray | None, str | None, bool | None]:
     """Factor ``B`` and estimate its condition independently.
 
     A failed condition estimate is not evidence that the matrix is singular;
@@ -99,11 +121,23 @@ def _iterative_condition_and_solve(
     try:
         lu = spla.splu(b_sparse)
     except Exception as exc:
-        return False, None, None, f"sparse factorization of I - A failed: {exc}"
+        return False, None, None, f"sparse factorization of I - A failed: {exc}", None
     try:
-        multipliers = np.asarray(lu.solve(np.ones(b_sparse.shape[0]), "T"), dtype=float)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            multipliers = np.asarray(
+                lu.solve(np.ones(b_sparse.shape[0]), "T"), dtype=float
+            )
     except Exception as exc:
-        return False, None, None, f"multiplier solve failed: {exc}"
+        return False, None, None, f"multiplier solve failed: {exc}", None
+    if not np.isfinite(multipliers).all():
+        return (
+            True,
+            None,
+            None,
+            "multiplier solve produced non-finite values",
+            False,
+        )
 
     try:
         norm_b = float(np.max(np.asarray(np.abs(b_sparse).sum(axis=0)).reshape(-1)))
@@ -120,7 +154,7 @@ def _iterative_condition_and_solve(
     except Exception as exc:
         estimate = None
         condition_reason = f"condition number estimate unavailable: {exc}"
-    return True, estimate, multipliers, condition_reason
+    return True, estimate, multipliers, condition_reason, True
 
 
 def diagnose_stability(a: Any, numerical_method: str = "dense") -> StabilityDiagnostics:
@@ -164,7 +198,13 @@ def diagnose_stability(a: Any, numerical_method: str = "dense") -> StabilityDiag
             b = sparse.eye(n, format="csc") - a_sparse.tocsc()
             result.B = b
             result.spectral_radius, result.spectral_radius_exact = _iterative_spectral_radius(a_sparse)
-            invertible, estimate, multipliers, condition_reason = _iterative_condition_and_solve(b)
+            (
+                invertible,
+                estimate,
+                multipliers,
+                condition_reason,
+                multipliers_finite,
+            ) = _iterative_condition_and_solve(b)
             result.invertible = invertible
             result.condition_number = estimate
             result.condition_number_exact = False if estimate is not None else None
@@ -175,14 +215,19 @@ def diagnose_stability(a: Any, numerical_method: str = "dense") -> StabilityDiag
             if condition_reason:
                 reasons.append(condition_reason)
             if invertible:
-                result.leontief_inverse_finite = True
+                result.leontief_inverse_finite = (
+                    False if multipliers_finite is False else None
+                )
                 result.negative_inverse_entries = {
                     "available": False,
                     "count": None,
                     "locations": [],
                     "values": [],
                 }
-                reasons.append("inverse not materialized on iterative route")
+                if multipliers_finite is not False:
+                    reasons.append(
+                        "inverse finiteness and negative entries were not materialized on iterative route"
+                    )
             else:
                 result.leontief_inverse_finite = False
                 reasons.append("sparse factorization of I - A failed")
@@ -195,5 +240,9 @@ def diagnose_stability(a: Any, numerical_method: str = "dense") -> StabilityDiag
         result.invertible = None
         result.leontief_inverse_finite = None
         return result
-    result.status = "PASS" if result.invertible else "FAIL"
+    result.status = (
+        "PASS"
+        if result.invertible and result.leontief_inverse_finite is not False
+        else "FAIL"
+    )
     return result

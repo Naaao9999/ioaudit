@@ -428,8 +428,18 @@ def _sum_similarity(
         if total is None:
             total = _axis_sum_for_total(value, axis)
         others = total - candidate
-        denominator = float(np.linalg.norm(candidate))
-        difference = float(np.linalg.norm(candidate - others))
+        scale = float(
+            max(
+                np.max(np.abs(candidate)) if candidate.size else 0.0,
+                np.max(np.abs(others)) if others.size else 0.0,
+            )
+        )
+        if scale == 0.0:
+            return 1.0
+        candidate_scaled = candidate / scale
+        others_scaled = others / scale
+        denominator = float(np.linalg.norm(candidate_scaled))
+        difference = float(np.linalg.norm(candidate_scaled - others_scaled))
         if denominator == 0.0:
             return 1.0 if difference == 0.0 else 0.0
         return max(0.0, 1.0 - difference / denominator)
@@ -459,7 +469,9 @@ def _total_candidates(value: Any, labels: list[Any] | None, axis: int) -> list[d
         label_evidence = _normalized_total_label(label)
         similarity = _sum_similarity(value, axis, index, total) if total is not None else None
         try:
-            nonzero_candidate = bool(np.linalg.norm(_dimension_vector(value, axis, index)) > 0.0)
+            nonzero_candidate = bool(
+                np.any(_dimension_vector(value, axis, index) != 0)
+            )
         except (TypeError, ValueError, FloatingPointError):
             nonzero_candidate = False
         sum_evidence = similarity is not None and similarity >= 0.999 and nonzero_candidate

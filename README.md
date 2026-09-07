@@ -9,7 +9,7 @@
 
 # 日本語
 
-`ioaudit` は、産業連関表を分析コードに渡す**前**に、データ構造、会計整合性、行列の向き、ゼロ構造、合計行・列の混入、桁・単位ミスの候補、Leontief 系の数値安定性などを診断する Python ライブラリです。
+`ioaudit` は、産業連関表を分析に使う前に、データや会計関係に問題がないかを `audit()` でまとめて確認します。
 
 > **Diagnose, do not repair. — 診断するが、自動修正しない。**
 
@@ -17,15 +17,16 @@
 
 ## できること
 
-`ioaudit` は、次のような「分析に渡す前の確認」を一つの `audit()` で実行します。
-
-- `Z`、`x`、`Y`、`V`、部門ラベルの shape・型・順序を検査
-- 転置の可能性、合計行・列、非部門項目、重複ラベルを検出
-- 宣言された会計規約に基づき、投入側・産出側の残差を計算
-- `Y` / `V` のsubtotal二重計上、交易表現、投入側調整の不足を診断
-- 技術係数 `A`、Leontief逆行列、スペクトラル半径、条件数を確認
-- `A_reference` / `L_reference` と比較し、桁・単位ミスの候補を報告
-- 結果を人間向けsummary、JSON、DataFrame、CI gateとして利用
+- `Z`、`x`、`Y`、`V` の形状、数値型、部門ラベル、並び順を確認
+- `Z` の行・列の向きを取り違えていないかを確認
+- 合計行・列、非部門項目、重複ラベル、ゼロ行・ゼロ列を検出
+- 指定した会計規約に基づいて、投入側・産出側の会計残差を計算
+- `Y` / `V` に小計が混ざって二重計上になっていないかを確認
+- 交易フローや `input_adjustments` を安全に会計計算へ使えるかを確認
+- 技術係数行列 `A`、スペクトル半径、`I - A` の可逆性、条件数、Leontief逆行列を確認
+- `A_reference` / `L_reference` がある場合は、再計算した行列との差を確認
+- 会計残差から、10倍・100倍・1000倍などの桁違い候補を検出
+- 結果を要約、JSON、DataFrameとして出力し、CIの判定にも利用
 
 CSV等のファイル形式は `inspect_csv()` で別途確認できます。ファイルから表の範囲や部門を自動推定する機能は含みません。
 
@@ -580,9 +581,7 @@ MIT License.
 
 # English
 
-`ioaudit` is a Python library for checking input-output tables **before** they are passed to analytical code.
-
-It audits data structure, accounting consistency, matrix orientation, zero structure, possible subtotal double counting, powers-of-ten scale errors, and numerical stability in Leontief systems.
+`ioaudit` is a Python library that uses `audit()` to check whether an input-output table is ready for analysis.
 
 > **Diagnose, do not repair.**
 
@@ -590,14 +589,15 @@ It audits data structure, accounting consistency, matrix orientation, zero struc
 
 ## What it can do
 
-`audit()` provides a single preflight pass for checks such as:
-
-- shape, type, order, and label alignment for `Z`, `x`, `Y`, and `V`
-- possible transposition, total rows or columns, non-sector content, and duplicate labels
-- input- and output-side residuals under an explicitly declared accounting convention
-- subtotal double-counting risk in `Y` / `V`, trade representation, and missing input adjustments
-- technical coefficients `A`, the Leontief inverse, spectral radius, and condition number
-- comparison with `A_reference` / `L_reference` and evidence for possible scale errors
+- shape, numeric type, sector labels, and order of `Z`, `x`, `Y`, and `V`
+- whether the rows and columns of `Z` may have been transposed
+- possible total rows or columns, non-sector items, duplicate labels, and zero rows or columns
+- input- and output-side accounting residuals under the declared convention
+- whether subtotal columns or rows in `Y` / `V` may cause double counting
+- whether trade flows and `input_adjustments` are safe to use in accounting checks
+- technical coefficients `A`, spectral radius, invertibility of `I - A`, condition number, and the Leontief inverse
+- differences between recalculated matrices and `A_reference` / `L_reference`
+- possible 10x, 100x, or 1000x scale errors suggested by accounting residuals
 - human-readable summaries, JSON/DataFrame export, and CI gates
 
 CSV and other delimited files can be checked separately with `inspect_csv()`. The library does not infer the table range or sector definitions from a file.

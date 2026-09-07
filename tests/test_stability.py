@@ -46,7 +46,25 @@ def test_iterative_condition_estimate_failure_does_not_imply_singularity(monkeyp
     )
     assert report.stability.invertible is True
     assert report.stability.condition_number is None
-    assert report.stability.leontief_inverse_finite is True
+    assert report.stability.leontief_inverse_finite is None
+
+
+def test_iterative_nonfinite_multipliers_are_not_reported_as_safe():
+    coefficient_matrix = np.array(
+        [
+            [0.0, 1.0e200, 0.0],
+            [0.0, 0.0, 1.0e200],
+            [0.0, 0.0, 0.0],
+        ]
+    )
+    report = audit(
+        IOSystem(coefficient_matrix, np.ones(3), ["a", "b", "c"]),
+        numerical_method="iterative",
+    )
+    assert report.stability.invertible is True
+    assert report.stability.column_multipliers is None
+    assert report.stability.leontief_inverse_finite is False
+    assert report.stability.status == "FAIL"
 
 
 def test_iterative_sparse_route_keeps_sparse_system():
