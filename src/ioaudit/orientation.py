@@ -7,14 +7,11 @@ from typing import Any
 
 import numpy as np
 
-from ._accounting_plan import AccountingPlan, compile_accounting_plan
+from ._accounting_plan import AccountingPlan
 from ._residuals import evaluate_residual, residual_for_side
 from .structure import (
     _alignment_is_safe,
     _core_inputs_are_safe,
-    _labels,
-    _same_labels,
-    _same_normalized_labels,
     _shape_of,
 )
 
@@ -41,7 +38,6 @@ def _score(
     z: Any,
     x: np.ndarray,
     plan: AccountingPlan,
-    tolerance: dict[str, float] | None = None,
 ) -> tuple[float | None, bool | None]:
     """Score one orientation using the already compiled accounting plan."""
 
@@ -51,13 +47,13 @@ def _score(
         residual = residual_for_side(z, x, side)
         if residual is None:
             continue
-        evaluation = evaluate_residual(residual, x, tolerance)
+        evaluation = evaluate_residual(residual, x, plan.tolerance)
         scores.append(evaluation.max_relative)
-        if tolerance is not None and evaluation.allowed is not None:
+        if plan.tolerance is not None and evaluation.allowed is not None:
             within_tolerance.append(bool(np.all(evaluation.absolute <= evaluation.allowed)))
     return (
         max(scores) if scores else None,
-        all(within_tolerance) if tolerance is not None and within_tolerance else None,
+        all(within_tolerance) if plan.tolerance is not None and within_tolerance else None,
     )
 
 
@@ -66,10 +62,8 @@ def diagnose_orientation(
     z: np.ndarray | None,
     x: np.ndarray | None,
     structure: Any,
-    components: Any = None,
-    tolerance: dict[str, float] | None = None,
     *,
-    plan: AccountingPlan | None = None,
+    plan: AccountingPlan,
 ) -> OrientationDiagnostics:
     """Compare current and transposed accounting evidence when available."""
 
@@ -84,39 +78,41 @@ def diagnose_orientation(
     ):
         result.evidence.append("orientation requires a numeric square Z and aligned x")
         return result
-    z_index, z_columns = _labels(io.Z)
-    if z_index is not None and z_columns is not None:
-        result.row_labels_match_columns = _same_labels(z_index, z_columns)
-        result.normalized_row_labels_match_columns = _same_normalized_labels(
-            z_index, z_columns
-        )
+    # Structure diagnostics are the single source of truth for positional
+    # alignment.  Re-reading raw labels here would allow orientation to use a
+    # different policy from accounting and the compiled accounting plan.
+    result.row_labels_match_columns = getattr(
+        structure, "row_column_labels_match", None
+    )
+    result.normalized_row_labels_match_columns = getattr(
+        structure, "normalized_row_column_labels_match", None
+    )
+    z_row_exact = getattr(structure, "z_row_labels_match_sectors", None)
+    z_column_exact = getattr(structure, "z_column_labels_match_sectors", None)
+    z_row_normalized = getattr(
+        structure, "normalized_z_row_labels_match_sectors", None
+    )
+    z_column_normalized = getattr(
+        structure, "normalized_z_column_labels_match_sectors", None
+    )
+    if z_row_exact is None and z_column_exact is None:
+        result.sector_order_consistent = len(io.sectors) == z_shape[0]
+        result.normalized_sector_order_consistent = result.sector_order_consistent
+    else:
         result.sector_order_consistent = (
-            len(io.sectors) == z_shape[0]
-            and all(a == b for a, b in zip(z_index, io.sectors))
-            and all(a == b for a, b in zip(z_columns, io.sectors))
+            z_row_exact is True and z_column_exact is True
         )
         result.normalized_sector_order_consistent = (
-            _same_normalized_labels(z_index, list(io.sectors))
-            and _same_normalized_labels(z_columns, list(io.sectors))
-            if len(io.sectors) == z_shape[0]
-            else False
+            z_row_normalized is True and z_column_normalized is True
         )
+    x_exact = getattr(structure, "x_labels_match", None)
+    x_normalized = getattr(structure, "normalized_x_labels_match", None)
+    if x_exact is None and x_normalized is None:
+        result.x_alignment = len(x) == len(io.sectors)
+        result.normalized_x_alignment = result.x_alignment
     else:
-        result.row_labels_match_columns = None
-        result.normalized_row_labels_match_columns = None
-        result.sector_order_consistent = len(io.sectors) == z.shape[0]
-        result.normalized_sector_order_consistent = result.sector_order_consistent
-    x_index, _ = _labels(io.x)
-    result.x_alignment = (
-        all(a == b for a, b in zip(x_index, io.sectors))
-        if x_index is not None and len(x_index) == len(io.sectors)
-        else (len(x) == len(io.sectors) if x_index is None else False)
-    )
-    result.normalized_x_alignment = (
-        _same_normalized_labels(x_index, list(io.sectors))
-        if x_index is not None and len(x_index) == len(io.sectors)
-        else (len(x) == len(io.sectors) if x_index is None else False)
-    )
+        result.x_alignment = x_exact
+        result.normalized_x_alignment = x_normalized
 
     if not _core_inputs_are_safe(structure):
         result.evidence.append(
@@ -140,17 +136,6 @@ def diagnose_orientation(
         )
         return result
 
-    if plan is None:
-        plan = compile_accounting_plan(
-            io,
-            z=z,
-            x=x,
-            convention=io.accounting,
-            sectors=list(io.sectors),
-            components=components,
-            structure=structure,
-            tolerance=tolerance,
-        )
     if not plan.output.available:
         result.evidence.append(
             "output accounting evidence is unavailable: "
@@ -176,12 +161,8 @@ def diagnose_orientation(
         )
         return result
 
-    current_score, current_within_tolerance = _score(
-        z, x, plan, tolerance=tolerance
-    )
-    transposed_score, transposed_within_tolerance = _score(
-        z.T, x, plan, tolerance=tolerance
-    )
+    current_score, current_within_tolerance = _score(z, x, plan)
+    transposed_score, transposed_within_tolerance = _score(z.T, x, plan)
     result.current_orientation_accounting_residual = current_score
     result.transposed_orientation_accounting_residual = transposed_score
     current = result.current_orientation_accounting_residual
@@ -189,15 +170,14 @@ def diagnose_orientation(
     result.comparison_available = current is not None and transposed is not None
     if result.comparison_available:
         if (
-            tolerance is not None
+            plan.tolerance is not None
             and current_within_tolerance is True
             and transposed_within_tolerance is True
         ):
-            result.possible_transpose = None
             result.evidence.append(
                 "current and transposed residuals are both within the declared tolerance"
             )
-        elif np.isfinite(current) and not np.isfinite(transposed):
+        if np.isfinite(current) and not np.isfinite(transposed):
             result.possible_transpose = False
         elif np.isfinite(transposed) and not np.isfinite(current):
             result.possible_transpose = True

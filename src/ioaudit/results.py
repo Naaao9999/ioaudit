@@ -2,73 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
 import json
 import math
 from collections.abc import Iterable
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from .exceptions import IOAuditError
+from ._serialization import flatten as _flatten, jsonable as _jsonable
 
 
 _MISSING = object()
-
-
-def _jsonable(value: Any) -> Any:
-    """Convert result objects to deterministic JSON-compatible values."""
-
-    if is_dataclass(value):
-        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, np.ndarray):
-        return _jsonable(value.tolist())
-    try:
-        from scipy import sparse
-
-        if sparse.issparse(value):
-            matrix = value.tocoo()
-            return {
-                "format": "coo",
-                "shape": [int(size) for size in matrix.shape],
-                "row": _jsonable(matrix.row),
-                "column": _jsonable(matrix.col),
-                "data": _jsonable(matrix.data),
-            }
-    except Exception:
-        pass
-    if isinstance(value, np.generic):
-        return _jsonable(value.item())
-    if isinstance(value, float) and not math.isfinite(value):
-        return "Infinity" if value > 0 else ("-Infinity" if value < 0 else "NaN")
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _flatten(value: Any, prefix: str, rows: list[dict[str, Any]]) -> None:
-    if is_dataclass(value):
-        for field in fields(value):
-            _flatten(getattr(value, field.name), f"{prefix}.{field.name}" if prefix else field.name, rows)
-    elif isinstance(value, dict):
-        if not value:
-            rows.append({"path": prefix, "value": {}})
-        for key, item in value.items():
-            _flatten(item, f"{prefix}.{key}" if prefix else str(key), rows)
-    elif isinstance(value, (list, tuple)):
-        if not value:
-            rows.append({"path": prefix, "value": []})
-        for index, item in enumerate(value):
-            _flatten(item, f"{prefix}[{index}]", rows)
-    elif isinstance(value, np.ndarray):
-        _flatten(value.tolist(), prefix, rows)
-    else:
-        rows.append({"path": prefix, "value": _jsonable(value)})
 
 
 class AuditReport:
@@ -146,7 +91,7 @@ class AuditReport:
         """Return one flattened ``path``/``value`` row per report value."""
 
         rows: list[dict[str, Any]] = []
-        _flatten(self.to_dict(), "", rows)
+        _flatten(self.to_dict(), "", rows, include_empty=True)
         return pd.DataFrame(rows, columns=["path", "value"])
 
     def _boolean_failures(self, *, include_reference: bool = False) -> list[str]:

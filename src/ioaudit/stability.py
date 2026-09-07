@@ -32,13 +32,6 @@ class StabilityDiagnostics:
     B: Any = None
     reason: str | None = None
 
-    @property
-    def L_calculated(self) -> Any:
-        """Alias for the calculated Leontief inverse."""
-
-        return self.leontief_inverse
-
-
 def _dense_spectral_radius(a: np.ndarray) -> float:
     values = np.linalg.eigvals(a)
     return float(np.max(np.abs(values))) if values.size else 0.0

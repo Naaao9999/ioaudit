@@ -6,6 +6,7 @@ they interpret Y, V, trade, and input adjustments in the same way.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -24,7 +25,10 @@ from .structure import (
 def axis_sum(value: Any, axis: int) -> np.ndarray:
     """Sum a dense or sparse matrix along one axis without densifying input."""
 
-    summed = value.sum(axis=axis)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with np.errstate(over="ignore", invalid="ignore"):
+            summed = value.sum(axis=axis)
     return np.asarray(summed, dtype=float).reshape(-1)
 
 

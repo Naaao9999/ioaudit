@@ -11,7 +11,7 @@ import unicodedata
 import numpy as np
 import pandas as pd
 
-from .model import IOSystem
+from .model import IOSystem, _TRADE_FLOW_FIELDS
 
 
 PASS = "PASS"
@@ -630,14 +630,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     trade = getattr(io, "trade", None)
     if trade is not None:
         result.trade_representation_conflicts = list(trade.representation_conflicts)
-        for field_name in (
-            "interregional_inflows",
-            "international_imports",
-            "interregional_outflows",
-            "international_exports",
-            "combined_inflows",
-            "combined_outflows",
-        ):
+        for field_name in _TRADE_FLOW_FIELDS:
             value = getattr(trade, field_name)
             if value is None:
                 continue

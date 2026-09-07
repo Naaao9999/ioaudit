@@ -98,7 +98,12 @@ def evaluate_residual(
                 <= np.finfo(float).eps * np.maximum(1.0, np.abs(denominator))
             )
         )
-    if allowed is None:
+    finite_values = bool(np.isfinite(values).all())
+    if not finite_values:
+        excess = values.copy()
+        status = "FAIL"
+        residual_class = "nonfinite"
+    elif allowed is None:
         excess = values.copy()
         status = "PASS" if exact else "AVAILABLE"
         residual_class = "exact" if exact else "nonzero"
@@ -107,12 +112,9 @@ def evaluate_residual(
             excess_abs = np.maximum(absolute - allowed, 0.0)
             excess = np.copysign(excess_abs, values)
             within_tolerance = bool(np.all(absolute <= allowed))
-        if exact:
+        if within_tolerance:
             status = "PASS"
-            residual_class = "exact"
-        elif within_tolerance:
-            status = "PASS"
-            residual_class = "rounding_level"
+            residual_class = "exact" if exact else "rounding_level"
         else:
             status = "FAIL"
             residual_class = "outside_tolerance"

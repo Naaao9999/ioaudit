@@ -21,6 +21,19 @@ def test_model_deep_copies_nested_sequence_inputs():
     assert io.Z[0][0] == 1.0
 
 
+def test_model_deep_copies_nested_metadata():
+    metadata = {"source": {"name": "table"}, "tags": ["official"]}
+    io = IOSystem(
+        np.eye(2),
+        np.ones(2),
+        ["A", "B"],
+        metadata=metadata,
+    )
+    metadata["source"]["name"] = "changed"
+    metadata["tags"].append("changed")
+    assert io.metadata == {"source": {"name": "table"}, "tags": ["official"]}
+
+
 def test_tradeflows_and_audit_do_not_mutate_source_arrays(normal_data):
     from ioaudit import audit
 

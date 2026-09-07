@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from ._accounting_plan import AccountingPlan
-from ._balance_core import axis_sum as _axis_sum, vector as _vector
+from ._balance_core import axis_sum as _axis_sum
 from ._residuals import PlanResiduals, evaluate_residual
 from .structure import (
     _all_finite,
@@ -73,16 +73,6 @@ class ScaleDiagnostics:
         )
 
 
-def _balance_residual(balance: Any) -> np.ndarray | None:
-    if balance is None or getattr(balance, "status", "SKIPPED") == "SKIPPED":
-        return None
-    try:
-        residual = np.asarray(balance.sector_residual, dtype=float).reshape(-1)
-    except (TypeError, ValueError):
-        return None
-    return residual if residual.size and np.isfinite(residual).all() else None
-
-
 def _metric(residuals: list[np.ndarray | None], x: np.ndarray) -> float | None:
     available = [value for value in residuals if value is not None]
     if not available:
@@ -90,8 +80,16 @@ def _metric(residuals: list[np.ndarray | None], x: np.ndarray) -> float | None:
     combined = np.concatenate(available)
     if not np.isfinite(combined).all():
         return None
-    denominator = max(float(np.linalg.norm(x)), 1.0)
-    return float(np.linalg.norm(combined) / denominator)
+    def safe_norm(values: np.ndarray) -> float:
+        scale = float(np.max(np.abs(values))) if values.size else 0.0
+        if scale == 0.0:
+            return 0.0
+        with np.errstate(over="ignore", invalid="ignore"):
+            return float(scale * np.linalg.norm(values / scale))
+
+    denominator = max(safe_norm(x), 1.0)
+    numerator = safe_norm(combined)
+    return float(numerator / denominator) if np.isfinite(numerator) else None
 
 
 def _evidence_residual(
@@ -109,13 +107,42 @@ def _evidence_residual(
 
     if residual is None:
         return None
-    return evaluate_residual(residual, x, tolerance).excess
+    values = np.asarray(residual, dtype=float)
+    if not np.isfinite(values).all():
+        return None
+    return evaluate_residual(values, x, tolerance).excess
 
 
 def _improvement(before: float, after: float) -> float | None:
     if not np.isfinite(before) or not np.isfinite(after) or before <= 0.0:
         return None
     return float((before - after) / before)
+
+
+def _adjust(
+    values: np.ndarray | None,
+    delta: float,
+    contribution: np.ndarray,
+    *,
+    add: bool = False,
+) -> np.ndarray | None:
+    """Apply a hypothetical scale change without leaking arithmetic warnings."""
+
+    if values is None:
+        return None
+    with np.errstate(over="ignore", invalid="ignore"):
+        return (
+            values + delta * contribution
+            if add
+            else values - delta * contribution
+        )
+
+
+def _scaled(value: float, factor: float) -> float:
+    """Multiply a scale candidate while preserving a diagnostic Inf result."""
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        return float(value * factor)
 
 
 def _coverage(
@@ -268,19 +295,15 @@ def _global_candidates(
             candidate_output = output_residual.copy() if output_residual is not None else None
             delta = factor - 1.0
             if field_name == "x":
-                if candidate_input is not None:
-                    candidate_input += delta * x
-                if candidate_output is not None:
-                    candidate_output += delta * x
+                candidate_input = _adjust(candidate_input, delta, x, add=True)
+                candidate_output = _adjust(candidate_output, delta, x, add=True)
             elif field_name == "Z":
-                if candidate_input is not None:
-                    candidate_input -= delta * column_sum
-                if candidate_output is not None:
-                    candidate_output -= delta * row_sum
+                candidate_input = _adjust(candidate_input, delta, column_sum)
+                candidate_output = _adjust(candidate_output, delta, row_sum)
             elif field_name == "Y" and candidate_output is not None and f is not None:
-                candidate_output -= delta * f
+                candidate_output = _adjust(candidate_output, delta, f)
             elif field_name == "V" and candidate_input is not None and v is not None:
-                candidate_input -= delta * v
+                candidate_input = _adjust(candidate_input, delta, v)
             selected_after_raw = [candidate_input, candidate_output]
             if field_name in {"x", "Z"}:
                 selected_after = [
@@ -352,9 +375,19 @@ def _row_candidates(
             continue
         row_values = _dimension_vector(z, 0, index)
         for factor in factors:
-            raw_after = abs(float(output_residual[index] - (factor - 1.0) * total))
+            delta = factor - 1.0
+            raw_after = abs(
+                float(
+                    _adjust(
+                        np.asarray([output_residual[index]]),
+                        delta,
+                        np.asarray([total]),
+                    )[0]
+                )
+            )
             candidate_output = output_residual.copy()
-            candidate_output[index] -= (factor - 1.0) * total
+            with np.errstate(over="ignore", invalid="ignore"):
+                candidate_output[index] -= delta * total
             candidate_output_evidence = _evidence_residual(
                 candidate_output, x, tolerance
             )
@@ -365,7 +398,7 @@ def _row_candidates(
             if improvement is None or improvement < _MIN_IMPROVEMENT:
                 continue
             candidate_input = (
-                input_residual - (factor - 1.0) * row_values
+                _adjust(input_residual, delta, row_values)
                 if input_residual is not None
                 else None
             )
@@ -429,9 +462,19 @@ def _column_candidates(
             continue
         column_values = _dimension_vector(z, 1, index)
         for factor in factors:
-            raw_after = abs(float(input_residual[index] - (factor - 1.0) * total))
+            delta = factor - 1.0
+            raw_after = abs(
+                float(
+                    _adjust(
+                        np.asarray([input_residual[index]]),
+                        delta,
+                        np.asarray([total]),
+                    )[0]
+                )
+            )
             candidate_input = input_residual.copy()
-            candidate_input[index] -= (factor - 1.0) * total
+            with np.errstate(over="ignore", invalid="ignore"):
+                candidate_input[index] -= delta * total
             candidate_input_evidence = _evidence_residual(
                 candidate_input, x, tolerance
             )
@@ -442,7 +485,7 @@ def _column_candidates(
             if improvement is None or improvement < _MIN_IMPROVEMENT:
                 continue
             candidate_output = (
-                output_residual - (factor - 1.0) * column_values
+                _adjust(output_residual, delta, column_values)
                 if output_residual is not None
                 else None
             )
@@ -513,8 +556,10 @@ def _cell_candidates(
         for factor in factors:
             candidate_output = output_residual.copy()
             candidate_input = input_residual.copy()
-            candidate_output[row] -= (factor - 1.0) * value
-            candidate_input[column] -= (factor - 1.0) * value
+            delta = factor - 1.0
+            with np.errstate(over="ignore", invalid="ignore"):
+                candidate_output[row] -= delta * value
+                candidate_input[column] -= delta * value
             candidate_output_evidence = _evidence_residual(
                 candidate_output, x, tolerance
             )
@@ -543,7 +588,7 @@ def _cell_candidates(
                 "column": _label(sectors, column),
                 "value": value,
                 "candidate_factor": factor,
-                "candidate_value": value * factor,
+                "candidate_value": _scaled(value, factor),
                 "output_residual_before": raw_before_output,
                 "output_residual_after": raw_after_output,
                 "input_residual_before": raw_before_input,
@@ -561,7 +606,9 @@ def _cell_candidates(
             if a_reference is not None:
                 current_a = value / x[column]
                 reference_before = abs(float(current_a - a_reference[row, column]))
-                reference_after = abs(float(factor * current_a - a_reference[row, column]))
+                reference_after = abs(
+                    float(_scaled(current_a, factor) - a_reference[row, column])
+                )
                 reference_improvement = _improvement(reference_before, reference_after)
                 item["A_reference_difference_before"] = reference_before
                 item["A_reference_difference_after"] = reference_after
@@ -589,6 +636,8 @@ def _robust_outliers(
 ) -> list[dict[str, Any]]:
     if residual is None:
         return []
+    if not np.isfinite(residual).all():
+        return []
     absolute = np.abs(residual)
     median = float(np.median(absolute))
     mad = float(np.median(np.abs(absolute - median)))
@@ -612,13 +661,12 @@ def diagnose_scale(
     z: Any,
     x: np.ndarray | None,
     io: Any,
-    accounting: Any,
     sectors: list[Any],
     factors: tuple[float, ...] = DEFAULT_SCALE_FACTORS,
     *,
     reference_diagnostics: Any = None,
-    plan: AccountingPlan | None = None,
-    baseline: PlanResiduals | None = None,
+    plan: AccountingPlan,
+    baseline: PlanResiduals,
 ) -> ScaleDiagnostics:
     """Find scale factors that materially reduce declared balance residuals."""
 
@@ -636,22 +684,20 @@ def diagnose_scale(
     ):
         result.reason = "scale diagnostics require finite numeric square Z and aligned x"
         return result
-    if accounting is None:
-        result.reason = "AccountingConvention was not supplied"
+    input_residual = baseline.input
+    output_residual = baseline.output
+    if any(
+        residual is not None and not np.isfinite(residual).all()
+        for residual in (input_residual, output_residual)
+    ):
+        result.reason = "scale diagnostics require finite accounting residuals"
         return result
-
-    if baseline is None:
-        input_residual = _balance_residual(getattr(accounting, "input_balance", None))
-        output_residual = _balance_residual(getattr(accounting, "output_balance", None))
-    else:
-        input_residual = baseline.input
-        output_residual = baseline.output
     if input_residual is None and output_residual is None:
         result.reason = "no auditable accounting residual was available"
         return result
 
     x_array = np.asarray(x, dtype=float).reshape(-1)
-    tolerance = getattr(accounting, "tolerance", None)
+    tolerance = plan.tolerance
     result.tolerance = dict(tolerance) if tolerance is not None else None
     result.rounding_context_available = tolerance is not None
     if tolerance is not None:
@@ -663,22 +709,8 @@ def diagnose_scale(
     try:
         row_sum = _axis_sum(z, 1)
         column_sum = _axis_sum(z, 0)
-        if plan is None:
-            f, _ = _vector(
-                getattr(io, "Y", None),
-                expected="Y",
-                n=z_shape[0],
-                sectors=sectors,
-            )
-            v, _ = _vector(
-                getattr(io, "V", None),
-                expected="V",
-                n=z_shape[0],
-                sectors=sectors,
-            )
-        else:
-            f = plan.y
-            v = plan.v
+        f = plan.y
+        v = plan.v
     except (TypeError, ValueError, FloatingPointError) as exc:
         result.reason = f"scale diagnostics could not read accounting fields: {exc}"
         return result

@@ -130,10 +130,11 @@ def test_noncompetitive_import_accounting_uses_explicit_vectors():
             accounting=convention,
         )
     )
-    assert report.accounting.inflow_adjustment_applied is True
-    assert report.accounting.outflow_adjustment_applied is True
-    assert report.accounting.inflows_used is True
-    assert report.accounting.outflows_used is True
+    assert set(report.accounting.output_balance.uses) == {
+        "Y",
+        "inflows",
+        "outflows",
+    }
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert "inflow (international_imports)" in report.accounting.output_balance.equation
 
@@ -163,8 +164,7 @@ def test_competitive_import_accounting_uses_signed_import_row():
         )
     )
     assert report.accounting.output_balance.max_absolute_residual == 0
-    assert report.accounting.inflow_adjustment_applied is True
-    assert report.accounting.inflows_used is True
+    assert set(report.accounting.output_balance.uses) == {"Y", "inflows"}
     assert "inflow (signed)" in report.accounting.formula
 
 
@@ -259,7 +259,7 @@ def test_total_transactions_rejects_non_embedded_trade_representation():
         )
     )
     assert report.accounting.output_balance.status == "SKIPPED"
-    assert "requires trade_representation='embedded'" in report.accounting.formula
+    assert "does not support explicitly declared" in report.accounting.formula
 
 
 def test_inflow_sign_is_not_applicable_for_total_scope():
@@ -281,7 +281,7 @@ def test_inflow_sign_is_not_applicable_for_total_scope():
     assert "inflow_sign not applicable" in report.accounting.notes
 
 
-def test_unknown_trade_representation_skips_even_with_total_scope():
+def test_total_scope_does_not_require_trade_representation():
     report = audit(
         IOSystem(
             np.array([[1.0]]),
@@ -293,7 +293,7 @@ def test_unknown_trade_representation_skips_even_with_total_scope():
             ),
         )
     )
-    assert report.accounting.output_balance.status == "SKIPPED"
+    assert report.accounting.output_balance.status == "PASS"
 
 
 def test_noncompetitive_without_import_vectors_skips_adjusted_side():
@@ -370,8 +370,7 @@ def test_input_adjustments_are_required_and_aggregated_by_user():
         )
     )
     assert report.accounting.input_balance.status == "PASS"
-    assert report.accounting.input_adjustment_applied is True
-    assert report.accounting.input_adjustments_used is True
+    assert set(report.accounting.input_balance.uses) == {"V", "input_adjustments"}
     assert report.accounting.input_balance.equation.endswith("+ input_adjustment")
 
 
@@ -412,3 +411,69 @@ def test_two_input_adjustment_representations_are_not_added_together():
     )
     assert report.accounting.input_balance.status == "SKIPPED"
     assert "complete" in report.accounting.input_balance.reason
+
+
+def test_nonfinite_accounting_residual_is_a_failure():
+    report = audit(
+        IOSystem(
+            np.zeros((1, 1)),
+            np.array([1.0]),
+            ["a"],
+            Y=np.array([[1.0e308, 1.0e308]]),
+            accounting=AccountingConvention.domestic_competitive(
+                trade_representation="embedded"
+            ),
+        )
+    )
+    assert report.accounting.output_balance.status == "FAIL"
+    assert report.accounting.output_balance.residual_class == "nonfinite"
+    assert report.passed() is False
+    assert report.scale.reason == "scale diagnostics require finite accounting residuals"
+
+
+def test_none_import_treatment_does_not_ignore_separate_trade_declaration():
+    report = audit(
+        IOSystem(
+            np.array([[1.0]]),
+            np.array([5.0]),
+            ["a"],
+            Y=np.array([4.0]),
+            trade=TradeFlows(
+                international_imports=np.array([1.0]),
+                international_exports=np.array([3.0]),
+            ),
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="none",
+                trade_representation="separate",
+                external_flow_scope="international",
+                inflow_sign="positive",
+                outflow_sign="positive",
+            ),
+        )
+    )
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert report.accounting.output_balance.uses == ()
+    assert "incompatible" in report.accounting.output_balance.reason
+    assert "does not support explicitly declared" in report.accounting.formula
+
+
+def test_explicit_zero_tolerance_takes_precedence_over_machine_precision():
+    report = audit(
+        IOSystem(
+            np.zeros((1, 1)),
+            np.array([1.0]),
+            ["a"],
+            Y=np.array([np.nextafter(1.0, 0.0)]),
+            accounting=AccountingConvention.domestic_competitive(
+                trade_representation="embedded"
+            ),
+        ),
+        accounting_tolerance={
+            "absolute": 0.0,
+            "relative": 0.0,
+            "rounding_unit": 0.0,
+        },
+    )
+    assert report.accounting.output_balance.status == "FAIL"
+    assert report.accounting.output_balance.residual_class == "outside_tolerance"

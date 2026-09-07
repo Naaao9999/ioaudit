@@ -68,11 +68,42 @@ class ComponentsDiagnostics:
     """Possible subtotal components that can make ``Y`` or ``V`` double-counted."""
 
     status: str = "SKIPPED"
-    possible_subtotal_columns: list[dict[str, Any]] = field(default_factory=list)
-    possible_subtotal_rows: list[dict[str, Any]] = field(default_factory=list)
-    double_count_risk: list[dict[str, Any]] = field(default_factory=list)
+    subtotal_candidates: list[dict[str, Any]] = field(default_factory=list)
     component_label_risks: list[dict[str, Any]] = field(default_factory=list)
     reason: str | None = None
+
+    @property
+    def possible_subtotal_columns(self) -> list[dict[str, Any]]:
+        """Return subtotal candidates found among component columns."""
+
+        return [
+            candidate
+            for candidate in self.subtotal_candidates
+            if candidate.get("axis") == "columns"
+        ]
+
+    @property
+    def possible_subtotal_rows(self) -> list[dict[str, Any]]:
+        """Return subtotal candidates found among component rows."""
+
+        return [
+            candidate
+            for candidate in self.subtotal_candidates
+            if candidate.get("axis") == "rows"
+        ]
+
+    @property
+    def double_count_risk(self) -> list[dict[str, Any]]:
+        """Return subtotal candidates annotated as double-count risks."""
+
+        return [
+            {
+                **candidate,
+                "reason": "subtotal/total component may already include the other components",
+                "double_count_risk": True,
+            }
+            for candidate in self.subtotal_candidates
+        ]
 
 
 def _labels(value: Any, axis: int) -> list[Any] | None:
@@ -82,11 +113,16 @@ def _labels(value: Any, axis: int) -> list[Any] | None:
 
 
 def _similarity(candidate: np.ndarray, others: np.ndarray) -> float:
-    difference = float(np.linalg.norm(candidate - others))
-    scale = float(np.linalg.norm(candidate))
+    if not np.isfinite(candidate).all() or not np.isfinite(others).all():
+        return 0.0
+    scale = float(max(np.max(np.abs(candidate)), np.max(np.abs(others))))
     if scale == 0.0:
-        return 1.0 if difference == 0.0 else 0.0
-    return max(0.0, 1.0 - difference / scale)
+        return 1.0
+    with np.errstate(over="ignore", invalid="ignore"):
+        difference = float(
+            np.linalg.norm((candidate - others) / scale)
+        )
+    return max(0.0, 1.0 - difference)
 
 
 def _best_subset(
@@ -108,16 +144,17 @@ def _best_subset(
     if size < 3 or size > maximum_components:
         return None
     candidate = array[candidate_index, :] if axis == 0 else array[:, candidate_index]
-    if not np.linalg.norm(candidate) > 0.0:
+    if not np.any(candidate != 0):
         return None
     other_indices = [index for index in range(size) if index != candidate_index]
     best: tuple[tuple[int, ...], float] | None = None
     for subset_size in range(2, len(other_indices) + 1):
         for subset in combinations(other_indices, subset_size):
-            if axis == 0:
-                aggregate = array[list(subset), :].sum(axis=0)
-            else:
-                aggregate = array[:, list(subset)].sum(axis=1)
+            with np.errstate(over="ignore", invalid="ignore"):
+                if axis == 0:
+                    aggregate = array[list(subset), :].sum(axis=0)
+                else:
+                    aggregate = array[:, list(subset)].sum(axis=1)
             similarity = _similarity(candidate, aggregate)
             if similarity < minimum_similarity:
                 continue
@@ -140,7 +177,8 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
         return []
     size = shape[axis]
     labels = _labels(value, axis)
-    total = array.sum(axis=axis)
+    with np.errstate(over="ignore", invalid="ignore"):
+        total = array.sum(axis=axis)
     candidates: list[dict[str, Any]] = []
     for index in range(size):
         candidate = array[index, :] if axis == 0 else array[:, index]
@@ -156,7 +194,7 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
         sum_evidence = (
             size >= 3
             and similarity >= 0.999
-            and bool(np.linalg.norm(candidate) > 0.0)
+            and bool(np.any(candidate != 0))
         )
         subset_match = _best_subset(
             array,
@@ -226,8 +264,8 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
         except Exception:
             continue
         found = _candidates(value, field_name=field_name, axis=axis)
+        result.subtotal_candidates.extend(found)
         if axis == 1:
-            result.possible_subtotal_columns.extend(found)
             if isinstance(value, pd.DataFrame):
                 result.component_label_risks.extend(
                     {
@@ -240,7 +278,6 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
                     )
                 )
         else:
-            result.possible_subtotal_rows.extend(found)
             if isinstance(value, pd.DataFrame):
                 result.component_label_risks.extend(
                     {
@@ -252,14 +289,6 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
                         value.index.tolist(), f"{field_name}.index"
                     )
                 )
-    result.double_count_risk = [
-        {
-            **candidate,
-            "reason": "subtotal/total component may already include the other components",
-            "double_count_risk": True,
-        }
-        for candidate in result.possible_subtotal_columns + result.possible_subtotal_rows
-    ]
     if available:
         result.status = (
             "WARNING"

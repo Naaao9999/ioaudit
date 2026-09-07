@@ -13,6 +13,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ._version import __version__
+from .model import _TRADE_FLOW_FIELDS
+
 
 def _canonical(value: Any) -> Any:
     """Convert supported IO inputs to stable JSON-compatible structures."""
@@ -84,14 +87,7 @@ def input_hash(io: Any) -> str:
     if trade is not None:
         trade_payload = {
             name: _canonical(getattr(trade, name))
-            for name in (
-                "interregional_inflows",
-                "international_imports",
-                "interregional_outflows",
-                "international_exports",
-                "combined_inflows",
-                "combined_outflows",
-            )
+            for name in _TRADE_FLOW_FIELDS
         }
     payload = {
         "Z": _canonical(io.Z),
@@ -119,7 +115,7 @@ def build_provenance(
     requested_numerical_method: str | None = None,
     accounting_tolerance: dict[str, float] | None = None,
     scale: Any = None,
-    version: str = "0.1.0",
+    version: str = __version__,
 ) -> dict[str, Any]:
     """Build an audit manifest; the timestamp records when the audit ran."""
 
