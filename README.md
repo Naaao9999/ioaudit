@@ -77,6 +77,55 @@ ioaudit never repairs input data. A consistent zero-output sector is handled as 
 
 Import treatment is declared through `AccountingConvention`; the presence of an import vector alone is never used to infer an accounting equation.
 
+### Conservative convention defaults / 保守的な既定値
+
+引数なしの `AccountingConvention()` は、会計上の意味を推測しない安全設定です。`transaction_scope`、`import_treatment`、`trade_representation`、`external_flow_scope`、`inflow_sign`、`outflow_sign` は `"unknown"` になり、影響を受ける会計診断は `SKIPPED` になります。
+
+`AccountingConvention()` is intentionally conservative. Its semantic fields default to `"unknown"`, so affected accounting checks are `SKIPPED` instead of relying on an implicit table format.
+
+日本の典型的な表形式を明示的に使う場合は、次のopt-inプリセットを利用できます。
+
+```python
+accounting = AccountingConvention.japan_competitive()
+```
+
+For the common Japanese format, use the explicit opt-in preset `AccountingConvention.japan_competitive()`. It expands to a domestic table with competitive imports, outflows in `Y`, international flows, negative signed inflows, and positive outflows.
+
+数値計算のアルゴリズム上の既定値（`numerical_method="auto"`、scale候補 `10**(-6..6)` のうち1を除く、最小改善率 `0.5`、全体適用範囲 `0.75`、反対側悪化許容 `0.10`）は設定されています。一方、単位・丸め幅・交易の意味に関する既定値は設定されません。
+
+Algorithmic defaults are provided for numerical routing and candidate screening. Unit, rounding, and trade semantics are never inferred; `accounting_tolerance` remains `None` unless the caller declares it.
+
+## Accounting diagnostics / 会計診断
+
+最終需要 `Y`、付加価値 `V`、会計規約を指定すると、投入側・産出側の会計整合性を追加で監査できます。会計上の意味を明示するため、規約の値は省略せず指定してください。
+
+```python
+from ioaudit import AccountingConvention
+
+accounting = AccountingConvention(
+    transaction_scope="domestic",
+    import_treatment="competitive",
+    trade_representation="embedded",
+    external_flow_scope="international",
+    inflow_sign="negative",
+    outflow_sign="positive",
+)
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=["agriculture", "manufacturing"],
+    Y=np.array([[6.0], [7.0]]),
+    V=np.array([[5.0, 8.0]]),
+    accounting=accounting,
+)
+report = audit(io)
+print(report.accounting.input_balance.status)
+print(report.accounting.output_balance.status)
+```
+
+Providing `Y`, `V`, and an explicit convention enables input- and output-side accounting checks. Omitted or semantically unknown convention fields skip only the affected checks.
+
 ### Competitive import sign convention / 競争輸入の符号規約
 
 v0.1 の `domestic/competitive` では、`inflow_sign="negative" | "positive" | "unknown"` を使用します。日本の産業連関表で一般的な負値の輸入行には `inflow_sign="negative"`、正の輸入額 `M` には `inflow_sign="positive"` を指定してください。
@@ -110,9 +159,9 @@ trade = TradeFlows(
 
 Use `combined_inflows` / `combined_outflows` for combined tables. Supplying combined and split representations on the same side causes the affected accounting diagnostic to be `SKIPPED` to prevent double counting.
 
-`external_flow_scope` は `international`、`interregional`、`both` のいずれかを宣言します。`trade_representation` は `embedded`、`outflows_in_Y`、`separate`、`unknown` から選び、`unknown` ではYとの関係を推測しません。
+`external_flow_scope` は `international`、`interregional`、`both`、`unknown` のいずれかを宣言します。`transaction_scope` と `import_treatment` にも `unknown` を指定できます。`trade_representation` は `embedded`、`outflows_in_Y`、`separate`、`unknown` から選び、`unknown` ではYとの関係を推測しません。
 
-Declare `external_flow_scope` as `international`, `interregional`, or `both`. Choose `trade_representation` from `embedded`, `outflows_in_Y`, `separate`, and `unknown`; `unknown` never triggers an inference about what is included in `Y`.
+Declare `external_flow_scope` as `international`, `interregional`, `both`, or `unknown`. `transaction_scope` and `import_treatment` also accept `unknown`. Choose `trade_representation` from `embedded`, `outflows_in_Y`, `separate`, and `unknown`; `unknown` never triggers an inference about what is included in `Y`.
 
 交易ベクトルは供給・需要側のフローとして扱い、購入部門別の輸移入投入を列側の投入会計へ流用しません。購入部門別の外部投入データがない場合、trade-adjusted input balance は `SKIPPED` です。
 
@@ -202,7 +251,11 @@ file diagnostics -> parsing by the caller -> IOSystem -> audit()
 
 `report.scale` は、宣言された会計残差を使って桁倍率の候補を診断します。`10**k`（`k=-6..6`、1を除く）を現在値に掛ける係数として仮想的に適用し、`x`・`Z`・`Y`・`V`の全体倍率、`Z`の行・列倍率、さらに行側と列側の両方を改善するセル倍率を候補として記録します。`A_reference` がある場合はセル候補に参照係数との差の改善も記録します。
 
+`accounting_tolerance` を指定した場合、scale候補の改善度は `max(absolute, relative * abs(x), rounding_unit)` を超える残差だけを使って評価します。元の残差は会計診断にそのまま保持されます。toleranceを指定しない場合は丸め情報がないため、誤検出を避ける目的でセル単位のscale診断を `SKIPPED` とし、`report.scale.cell_reason` に `rounding context unavailable` を記録します。
+
 `report.scale` diagnoses candidate scale factors using declared accounting residuals. It virtually applies `10**k` for `k=-6..6` except `1` to global `x`, `Z`, `Y`, and `V`, to `Z` rows and columns, and to individual cells that improve both sides. When `A_reference` is available, reference-coefficient improvement is also recorded.
+
+When `accounting_tolerance` is supplied, scale evidence uses only residuals beyond `max(absolute, relative * abs(x), rounding_unit)`, while raw accounting residuals remain unchanged. Without a declared rounding context, cell-level scale diagnostics are `SKIPPED` and `report.scale.cell_reason` records `rounding context unavailable`.
 
 候補は修正値ではなく残差改善の証拠です。行・列候補は反対側の会計残差も評価し、反対側を10%超悪化させる候補は報告しません。反対側を監査できない候補は `opposite_balance_available=False`、`evidence_level="one_sided"` として保存されます。
 

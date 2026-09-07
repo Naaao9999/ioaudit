@@ -12,6 +12,8 @@ def _trade_data():
     outflow = np.array([3.0, 4.0])
     x = np.array([89.0, 78.0])
     convention = AccountingConvention(
+        transaction_scope="domestic",
+        import_treatment="competitive",
         trade_representation="separate",
         external_flow_scope="both",
         inflow_sign="positive",
@@ -40,6 +42,8 @@ def test_outflows_in_y_uses_only_inflows():
     z, _, f, v, inflow, _, _ = _trade_data()
     x = np.array([86.0, 74.0])
     convention = AccountingConvention(
+        transaction_scope="domestic",
+        import_treatment="competitive",
         trade_representation="outflows_in_Y",
         external_flow_scope="both",
         inflow_sign="positive",

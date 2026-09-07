@@ -194,6 +194,8 @@ def _trade_side(
 
     if trade is None:
         return None, f"trade.{side} was not supplied", None
+    if scope not in {"international", "interregional", "both"}:
+        return None, "external_flow_scope='unknown'; trade scope is not declared", None
     if side == "inflows":
         combined_name = "combined_inflows"
         components = {
@@ -334,6 +336,16 @@ def diagnose_accounting(
     elif representation == "unknown":
         result.formula = "output: SKIPPED because trade_representation='unknown'"
         result.output_balance.reason = "trade representation in Y is unknown; no output-side inference is performed"
+    elif (
+        convention.transaction_scope == "unknown"
+        or convention.import_treatment == "unknown"
+    ):
+        result.formula = (
+            "output: SKIPPED because transaction_scope or import_treatment is unknown"
+        )
+        result.output_balance.reason = (
+            "transaction_scope/import_treatment is unknown; no output-side accounting equation is inferred"
+        )
     elif convention.transaction_scope == "total" or convention.import_treatment == "none":
         result.formula = (
             "output: x = row_sum(Z) + row_sum(Y); "

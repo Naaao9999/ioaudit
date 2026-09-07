@@ -43,7 +43,7 @@ def test_tradeflows_and_audit_do_not_mutate_source_arrays(normal_data):
 
 def test_convention_validation():
     with pytest.raises(IOValidationError):
-        AccountingConvention(transaction_scope="unknown")
+        AccountingConvention(transaction_scope="unsupported")
     with pytest.raises(IOValidationError):
         IOSystem(np.eye(2), np.ones(2), ["a", "b"], accounting="domestic")
     with pytest.raises(IOValidationError):
@@ -53,3 +53,21 @@ def test_convention_validation():
 def test_convention_serializes_import_sign():
     convention = AccountingConvention(import_sign="positive")
     assert convention.to_dict()["import_sign"] == "positive"
+
+
+def test_plain_convention_is_conservative_and_japan_preset_is_explicit():
+    plain = AccountingConvention()
+    assert plain.transaction_scope == "unknown"
+    assert plain.import_treatment == "unknown"
+    assert plain.trade_representation == "unknown"
+    assert plain.external_flow_scope == "unknown"
+    assert plain.inflow_sign == "unknown"
+    assert plain.outflow_sign == "unknown"
+
+    japan = AccountingConvention.japan_competitive()
+    assert japan.transaction_scope == "domestic"
+    assert japan.import_treatment == "competitive"
+    assert japan.trade_representation == "outflows_in_Y"
+    assert japan.external_flow_scope == "international"
+    assert japan.inflow_sign == "negative"
+    assert japan.outflow_sign == "positive"

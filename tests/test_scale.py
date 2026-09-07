@@ -12,7 +12,7 @@ def test_global_x_scale_candidate_uses_accounting_residuals():
         ["A", "B"],
         Y=np.array([8.0, 7.0]),
         V=np.array([8.0, 7.0]),
-        accounting=AccountingConvention(trade_representation="embedded"),
+        accounting=AccountingConvention(transaction_scope="domestic", import_treatment="competitive", trade_representation="embedded"),
     )
     report = audit(io)
     candidate = next(
@@ -33,7 +33,7 @@ def test_global_y_and_v_candidates_use_only_their_affected_balance():
             ["A", "B"],
             Y=np.array([8000.0, 7000.0]),
             V=np.array([8000.0, 7000.0]),
-            accounting=AccountingConvention(trade_representation="embedded"),
+            accounting=AccountingConvention(transaction_scope="domestic", import_treatment="competitive", trade_representation="embedded"),
         )
     )
     y_candidate = next(
@@ -64,7 +64,7 @@ def test_row_and_column_scale_candidates_are_reported():
             ["A", "B"],
             Y=y,
             V=v,
-            accounting=AccountingConvention(trade_representation="embedded"),
+            accounting=AccountingConvention(transaction_scope="domestic", import_treatment="competitive", trade_representation="embedded"),
         )
     )
     row = next(
@@ -93,8 +93,9 @@ def test_cell_scale_candidate_requires_both_accounting_sides():
             Y=np.array([10.0, 10.0]),
             V=np.array([9.0, 11.0]),
             A_reference=z / np.array([13.0, 17.0])[np.newaxis, :],
-            accounting=AccountingConvention(trade_representation="embedded"),
-        )
+            accounting=AccountingConvention(transaction_scope="domestic", import_treatment="competitive", trade_representation="embedded"),
+        ),
+        accounting_tolerance={"absolute": 1.0},
     )
     candidate = next(
         item
@@ -107,6 +108,27 @@ def test_cell_scale_candidate_requires_both_accounting_sides():
     assert candidate["output_residual_improvement"] == 1.0
     assert candidate["input_residual_improvement"] == 1.0
     assert candidate["reference_evidence"] == "A_reference also improves"
+
+
+def test_cell_scale_is_skipped_without_rounding_context():
+    report = audit(
+        IOSystem(
+            np.array([[1.0, 2000.0], [3.0, 4.0]]),
+            np.array([13.0, 17.0]),
+            ["A", "B"],
+            Y=np.array([10.0, 10.0]),
+            V=np.array([9.0, 11.0]),
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="competitive",
+                trade_representation="embedded",
+            ),
+        )
+    )
+    assert report.scale.cell_status == "SKIPPED"
+    assert report.scale.cell_reason == "rounding context unavailable"
+    assert report.scale.possible_cell_scale_errors == []
+    assert any("rounding context unavailable" in warning for warning in report.warnings)
 
 
 def test_balanced_table_has_available_but_empty_scale_candidates(normal_io):
@@ -122,7 +144,7 @@ def test_one_sided_scale_candidates_are_marked_as_one_sided():
             np.array([2.0, 2.0]),
             ["A", "B"],
             Y=np.array([1.0, 1.0]),
-            accounting=AccountingConvention(trade_representation="embedded"),
+            accounting=AccountingConvention(transaction_scope="domestic", import_treatment="competitive", trade_representation="embedded"),
         )
     )
     candidate = next(

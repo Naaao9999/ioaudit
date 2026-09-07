@@ -12,7 +12,7 @@ def _io_with_output_residual(residual):
         Y=np.array([5.0 + residual, 5.0]),
         V=np.array([5.0, 5.0]),
         imports=np.zeros(2),
-        accounting=AccountingConvention(),
+        accounting=AccountingConvention.japan_competitive(),
     )
 
 
@@ -36,3 +36,30 @@ def test_rounding_aware_accounting_marks_large_residual_as_fail():
     assert report.passed() is False
     with pytest.raises(IOAuditError):
         report.raise_for_status()
+
+
+def test_scale_ignores_residuals_inside_declared_rounding_envelope():
+    report = audit(
+        IOSystem(
+            np.diag([2.0, 3.0]),
+            np.array([10.0, 10.0]),
+            ["A", "B"],
+            Y=np.array([8.5, 7.0]),
+            V=np.array([8.0, 7.0]),
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="competitive",
+                trade_representation="embedded",
+            ),
+        ),
+        accounting_tolerance={
+            "absolute": 1.0,
+            "relative": 0.0,
+            "rounding_unit": 1.0,
+        },
+    )
+    assert report.accounting.output_balance.status == "ROUNDING_LEVEL"
+    assert report.accounting.output_balance.max_absolute_residual == 0.5
+    assert report.scale.rounding_context_available is True
+    assert report.scale.possible_global_scale_mismatches == []
+    assert report.scale.possible_cell_scale_errors == []

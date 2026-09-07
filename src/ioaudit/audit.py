@@ -103,6 +103,13 @@ def audit(
         warnings.append(
             "Y/V subtotal components may be double-counted; inspect report.components.double_count_risk"
         )
+    if (
+        getattr(scale, "status", None) == "AVAILABLE"
+        and getattr(scale, "cell_status", None) == "SKIPPED"
+    ):
+        warnings.append(
+            "cell scale diagnostics skipped: rounding context unavailable"
+        )
     if structure.possible_nonsector_rows or structure.possible_nonsector_columns:
         warnings.append("possible non-sector labels were found in Z")
     if structure.possible_duplicate_rows or structure.possible_duplicate_columns:
