@@ -237,6 +237,31 @@ def test_explicit_generalized_unknown_inflow_sign_is_not_overridden():
     assert report.accounting.output_balance.status == "SKIPPED"
 
 
+def test_total_transactions_rejects_non_embedded_trade_representation():
+    report = audit(
+        IOSystem(
+            np.array([[1.0]]),
+            np.array([5.0]),
+            ["A"],
+            Y=np.array([4.0]),
+            trade=TradeFlows(
+                combined_inflows=np.array([1.0]),
+                combined_outflows=np.array([1.0]),
+            ),
+            accounting=AccountingConvention(
+                transaction_scope="total",
+                import_treatment="none",
+                trade_representation="separate",
+                external_flow_scope="international",
+                inflow_sign="positive",
+                outflow_sign="positive",
+            ),
+        )
+    )
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert "requires trade_representation='embedded'" in report.accounting.formula
+
+
 def test_inflow_sign_is_not_applicable_for_total_scope():
     report = audit(
         IOSystem(

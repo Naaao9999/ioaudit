@@ -95,6 +95,50 @@ def test_subtotal_y_is_not_reused_for_orientation_evidence():
     assert report.orientation.possible_transpose is None
 
 
+def test_component_label_ambiguity_is_not_reused_for_orientation_evidence():
+    y = pd.DataFrame(
+        [[1.0, 1.0], [2.0, 2.0]],
+        index=["a", "b"],
+        columns=["demand", "demand "],
+    )
+    report = audit(
+        IOSystem(
+            np.array([[2.0, 1.0], [4.0, 3.0]]),
+            np.array([5.0, 6.0]),
+            ["a", "b"],
+            Y=y,
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="competitive",
+                trade_representation="embedded",
+            ),
+        )
+    )
+    assert report.components.component_label_risks
+    assert report.orientation.comparison_available is False
+    assert report.orientation.possible_transpose is None
+
+
+def test_orientation_comparison_respects_accounting_tolerance():
+    report = audit(
+        IOSystem(
+            np.array([[1.0, 2.0], [1.0, 1.0]]),
+            np.array([4.5, 3.5]),
+            ["a", "b"],
+            Y=np.array([1.0, 1.0]),
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="competitive",
+                trade_representation="embedded",
+            ),
+        ),
+        accounting_tolerance={"absolute": 2.0},
+    )
+    assert report.accounting.output_balance.residual_class == "rounding_level"
+    assert report.orientation.comparison_available is True
+    assert report.orientation.possible_transpose is None
+
+
 def test_x_label_mismatch_fails_orientation_and_pipeline():
     z = pd.DataFrame(np.eye(2), index=["a", "b"], columns=["a", "b"])
     x = pd.Series([1.0, 1.0], index=["b", "a"])
