@@ -565,6 +565,9 @@ A possible transpose is reported as evidence only. The matrix is never transpose
 ### Accounting consistency
 
 When `Y`, `V`, and an explicit accounting convention are available, `ioaudit` can evaluate input- and output-side accounting residuals, including:
+引数なしの `AccountingConvention()` は、会計上の意味を推測しない安全設定です。`transaction_scope`、`import_treatment`、`trade_representation`、`external_flow_scope`、`inflow_sign`、`outflow_sign`、`input_representation` は `"unknown"` になり、影響を受ける会計診断は `SKIPPED` になります。
+
+`AccountingConvention()` is intentionally conservative. Its semantic fields, including `input_representation`, default to `"unknown"`, so affected accounting checks are `SKIPPED` instead of relying on an implicit table format.
 
 - sector-level residuals
 - absolute residuals
@@ -676,6 +679,7 @@ accounting = AccountingConvention(
     external_flow_scope="international",
     inflow_sign="negative",
     outflow_sign="positive",
+    input_representation="complete",
 )
 ```
 
@@ -699,9 +703,94 @@ report = audit(io)
 
 `ioaudit` does not infer import treatment or an accounting equation merely from the presence of an import vector.
 
-## Rounding tolerance
+## Input-side representation / 投入側表現
 
-Published input-output tables may contain residuals caused by rounding. Tolerances can be declared explicitly:
+投入側の `V` が国内中間投入だけを補足する表など、購入部門別の外部調整が必要な場合は、`input_representation="adjustments_required"` を明示します。調整値は符号込みで、`(n,)` または購入部門を列に持つ `(m, n)` として指定できます。
+
+```python
+accounting = AccountingConvention.domestic_competitive(
+    trade_representation="embedded",
+    input_representation="adjustments_required",
+)
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    V=V,
+    input_adjustments_by_user=adjustments,
+    accounting=accounting,
+)
+```
+
+`external_inputs_by_user` と `input_adjustments_by_user` は代替表現です。同時指定は二重計上の可能性があるため、投入側会計を `SKIPPED` にします。`input_representation="unknown"`（`AccountingConvention()` の既定値）では、Vが完全な付加価値か外部調整を要するかを推測しません。
+
+If `V` contains only domestic value-added items and user-specific external input adjustments are required, declare `input_representation="adjustments_required"`. The signed adjustment can have shape `(n,)` or `(m, n)`; the latter is summed over input rows. `external_inputs_by_user` and `input_adjustments_by_user` are alternative representations. Supplying both skips the input balance to avoid ambiguous double counting. `input_representation="unknown"` never infers whether `V` is complete.
+
+### Competitive import sign convention / 競争輸入の符号規約
+
+v0.1 の `domestic/competitive` では、`inflow_sign="negative" | "positive" | "unknown"` を使用します。日本の産業連関表で一般的な負値の輸入行には `inflow_sign="negative"`、正の輸入額 `M` には `inflow_sign="positive"` を指定してください。
+
+For `domestic/competitive` in v0.1, use `inflow_sign="negative" | "positive" | "unknown"`. Use `inflow_sign="negative"` for signed negative import rows commonly found in Japanese IO tables, and `inflow_sign="positive"` when imports are stored as positive magnitudes `M`.
+
+`negative` は `imports=-M` として `x = row_sum(Z) + f + imports`、`positive` は `imports=M` として `x = row_sum(Z) + f - imports` を適用します。`unknown` では符号を推測せず、調整済みの産出側会計監査を `SKIPPED` にします。旧APIの `import_sign` は `inflow_sign` の互換エイリアスです。
+
+`negative` applies `x = row_sum(Z) + f + imports` for `imports=-M`; `positive` applies `x = row_sum(Z) + f - imports` for `imports=M`. With `unknown`, no sign inference is performed and the adjusted output balance is `SKIPPED`. The legacy `import_sign` argument is accepted as a compatibility alias for `inflow_sign`.
+
+`import_treatment="none"` または `transaction_scope="total"` では import sign は会計計算に適用されず、レポートに `import_sign not applicable` が残ります。`trade_representation="unknown"` はこの指定より優先され、Yとの関係が不明なため産出側会計を `SKIPPED` にします。
+
+With `import_treatment="none"` or `transaction_scope="total"`, the import sign is not applied and the report records `import_sign not applicable`. `trade_representation="unknown"` takes precedence and skips output accounting because the relationship between `Y` and trade is unknown.
+
+## TradeFlows / 交易フロー
+
+地域表・全国表の交易は、`imports` / `exports` の個別引数ではなく `TradeFlows` にまとめて指定します。
+
+For national and regional tables, provide trade through `TradeFlows` instead of separate legacy `imports` / `exports` arguments.
+
+```python
+trade = TradeFlows(
+    interregional_inflows=imin,
+    international_imports=imports,
+    interregional_outflows=imout,
+    international_exports=exports,
+)
+```
+
+合算表では `combined_inflows` / `combined_outflows` を使用します。片側で合算表と分割表を同時に指定すると、二重計上防止のため該当する会計診断を `SKIPPED` にします。
+
+Use `combined_inflows` / `combined_outflows` for combined tables. Supplying combined and split representations on the same side causes the affected accounting diagnostic to be `SKIPPED` to prevent double counting.
+
+`external_flow_scope` は `international`、`interregional`、`both`、`unknown` のいずれかを宣言します。`transaction_scope` と `import_treatment` にも `unknown` を指定できます。`trade_representation` は `embedded`、`outflows_in_Y`、`separate`、`unknown` から選び、`unknown` ではYとの関係を推測しません。
+
+Declare `external_flow_scope` as `international`, `interregional`, `both`, or `unknown`. `transaction_scope` and `import_treatment` also accept `unknown`. Choose `trade_representation` from `embedded`, `outflows_in_Y`, `separate`, and `unknown`; `unknown` never triggers an inference about what is included in `Y`.
+
+交易ベクトルは供給・需要側のフローとして扱い、購入部門別の輸移入投入を列側の投入会計へ流用しません。購入部門別の外部投入データがない場合、trade-adjusted input balance は `SKIPPED` です。
+
+Trade vectors are treated as supply/demand-side flows and are not reused as user-specific intermediate inputs. Without user-specific external-input data, the trade-adjusted input balance is `SKIPPED`.
+
+## Component and structure diagnostics / 構成要素・構造診断
+
+`report.components` は、`Y` の合計列や `V` の付加価値計行が他の構成要素の合計に近い場合に、二重計上候補として報告します。候補を自動的に除外せず、会計監査の `sum(axis=...)` も変更しません。
+
+`report.components` reports possible double counting when a total column in `Y` or a value-added total row in `V` is close to the sum of its components. Candidates are reported, not removed, and the accounting sums are not changed automatically.
+
+subtotal候補が検出された場合は、曖昧な列・行を選ばないため、Y側のoutput balanceまたはV側のinput balanceを `SKIPPED` にします。部分subtotalについては、成分数12以下の場合だけ小規模な部分集合を探索し、`subset_indices`、`subset_labels`、`subset_size`、`sum_similarity` を返します。2成分しかないY/Vでは、ラベルのない数値一致だけではsubtotalと判定しません。
+
+When a subtotal candidate is detected, the corresponding output or input balance is `SKIPPED` because the correct subset is ambiguous. For small component panels (at most 12 components), partial subsets are searched and reported with `subset_indices`, `subset_labels`, `subset_size`, and `sum_similarity`. For a two-component `Y` or `V`, an unlabeled numeric match alone is not treated as a subtotal.
+
+`report.structure` には、`possible_nonsector_rows` / `possible_nonsector_columns`、完全一致する `possible_duplicate_rows` / `possible_duplicate_columns`、Unicode幅・空白を正規化したラベル一致、`duplicate_labels_after_normalization` が含まれます。`合計`、`輸入`、`最終需要`、`付加価値` などのラベルはZへの混入候補として警告されます。
+
+`report.structure` includes possible non-sector rows and columns, exact duplicate rows and columns, normalized label matches, and `duplicate_labels_after_normalization`. Labels such as `合計`, `輸入`, `最終需要`, and `付加価値` are reported as possible non-sector content in `Z`.
+
+`report.zero_output` は、`all_zero_rows`、`all_zero_columns`、`isolated_sectors` に加え、全ゼロ行・列が最終需要や付加価値で支えられている証拠を返します。これらは切り出しや欠損の確認材料であり、自動削除やゼロ置換は行いません。
+
+`report.zero_output` returns `all_zero_rows`, `all_zero_columns`, `isolated_sectors`, and separate evidence lists for positive final demand and positive value added. These are evidence for checking extraction and missing values; no rows are deleted and no values are replaced with zero.
+
+## Accounting tolerance / 会計許容差
+
+丸め誤差を考慮する場合は、許容値を明示して監査します。指定値はレポートと provenance に保存され、入力値は変更されません。
+
+Declare tolerances when published tables are rounded. The selected values are stored in the report and provenance, and the input values remain unchanged.
 
 ```python
 report = audit(
@@ -717,6 +806,33 @@ report = audit(
 A non-zero residual within the declared tolerance is reported as `ROUNDING_LEVEL`.
 
 The selected tolerance is stored in the report provenance. Input values are never changed.
+会計診断は、完全一致なら `PASS`、許容差なしで残差がある場合は `AVAILABLE`（残差値を参照）、許容範囲内の丸め差なら `ROUNDING_LEVEL`、許容範囲外なら `FAIL` を返します。`raise_for_status()` は既定では会計相対残差ゲートを追加しません。相対残差をCI条件にする場合は `report.raise_for_status(max_relative_residual=1e-4)` のように明示してください。`max_spectral_radius` の既定値は `1.0` です。
+
+Accounting diagnostics return `PASS` for exact agreement, `AVAILABLE` for a nonzero residual without a declared tolerance, `ROUNDING_LEVEL` for residuals within the declared tolerance, and `FAIL` otherwise. `raise_for_status()` does not add an accounting relative-residual gate by default. Add one explicitly for CI, for example `report.raise_for_status(max_relative_residual=1e-4)`. The default `max_spectral_radius` is `1.0`.
+
+任意の入力不足を許容する通常のゲートとは別に、両側の会計診断と数値診断が利用可能であることを要求できます。
+
+```python
+report.passed(require_complete=True)
+report.raise_for_status(require_complete=True)
+```
+
+`passed()` の既定値は、オプション情報がないだけの監査を失敗にしません。
+
+特定の診断だけを必須にする場合は、レポートパスを指定できます。
+
+```python
+report.passed(require_available=["accounting.output_balance", "stability"])
+report.raise_for_status(require_available=["accounting.output_balance"])
+```
+
+`require_available` は指定したオブジェクトが存在し、`status != "SKIPPED"` であることを要求します。`reference.A` のような任意の診断にも使えます。
+
+Reference行列が不正な場合も、既定の `report.passed()` は表本体の診断結果を維持します。Referenceを明示的にゲートへ含める場合は `fail_on_reference=True` を指定します。`require_available` で指定した診断は、存在するだけでなく `FAIL` でも失敗になります。
+
+Invalid optional reference matrices do not fail the core `report.passed()` gate by default. Use `fail_on_reference=True` to include reference validity explicitly. A path supplied to `require_available` must exist and must not be `SKIPPED` or `FAIL`.
+
+The default gate allows optional diagnostics to be unavailable. Use `require_complete=True` when the accounting sides and downstream numerical diagnostics must all be available, or `require_available=[...]` to require selected report paths only.
 
 ## Trade flows
 
@@ -835,6 +951,15 @@ File-level diagnostics can report issues such as:
 - repeated headers within the file
 
 `ioaudit` does not automatically infer which regions of a file correspond to `Z`, `x`, `Y`, or `V`, and it does not remove footnotes or total rows automatically.
+タイトル・出典などの前文がある場合は、`header_line`、`preamble_rows`、`header_continuation_rows` として位置を報告します。表の行ラベル用に先頭列のヘッダーが空欄の場合は `leading_empty_headers` に記録します。これらは診断情報であり、行列範囲の自動確定や行の削除は行いません。
+
+The file-level diagnostic reports encoding/BOM, delimiter, blank rows, inconsistent column counts, duplicate or empty headers, trailing delimiters, quoting anomalies, whitespace, non-numeric tokens, NaN/Inf-like tokens, possible unquoted thousands separators, note rows, and repeated headers.
+
+For files with title or source preambles, `header_line`, `preamble_rows`, and `header_continuation_rows` report their locations. A blank leading stub header is recorded in `leading_empty_headers`. These are diagnostics only; no table range is auto-selected and no rows are deleted.
+
+桁区切りの変換、行列範囲の推測、脚注や合計行の削除、Z・x・Y・Vの自動抽出は行いません。
+
+It does not convert thousands separators, infer matrix ranges, delete notes or totals, or automatically extract `Z`, `x`, `Y`, and `V`.
 
 ```text
 file diagnostics

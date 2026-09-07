@@ -11,6 +11,7 @@ from .accounting import (
     _axis_sum,
     _inflow_adjustment,
     _outflow_adjustment,
+    _resolve_input_adjustment,
     _trade_side,
     _vector,
 )
@@ -40,8 +41,8 @@ def _score(
     io: Any,
 ) -> float | None:
     scores: list[float] = []
+    convention = io.accounting
     if f is not None:
-        convention = io.accounting
         base = _axis_sum(z, 1) + f
         residual = None
         trade = getattr(io, "trade", None)
@@ -107,8 +108,18 @@ def _score(
             np.divide(abs_residual, np.abs(x), out=relative, where=nz)
             relative[(~nz) & (abs_residual != 0)] = np.inf
             scores.append(float(np.max(relative)) if relative.size else 0.0)
+    input_residual = None
     if v is not None:
-        residual = x - (_axis_sum(z, 0) + v)
+        input_representation = convention.input_representation
+        adjustment, _, adjustment_source = _resolve_input_adjustment(
+            io, n=z.shape[0]
+        )
+        if input_representation == "complete" and adjustment_source is None:
+            input_residual = x - (_axis_sum(z, 0) + v)
+        elif input_representation == "adjustments_required" and adjustment is not None:
+            input_residual = x - (_axis_sum(z, 0) + v + adjustment)
+    if input_residual is not None:
+        residual = input_residual
         abs_residual = np.abs(residual)
         relative = np.zeros_like(abs_residual)
         nz = x != 0

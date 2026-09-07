@@ -75,3 +75,30 @@ def test_completely_blank_csv_row_is_reported(tmp_path: Path):
     result = inspect_csv(path)
     assert result.completely_blank_rows == [3]
     assert result.status == "WARNING"
+
+
+def test_preamble_and_descriptive_header_do_not_create_false_width_failures(tmp_path: Path):
+    path = tmp_path / "bea.csv"
+    path.write_text(
+        "Total Requirements\n"
+        "Total Requirements\n"
+        "\n"
+        ",Industries/Industries,11,21\n"
+        ",Industry Description,Agriculture,Mining\n"
+        "11,Agriculture,1.0,0.1\n"
+        "21,Mining,0.2,1.1\n"
+        ",Total industry output requirement,1.2,1.2\n"
+        "\n"
+        "Legend/Footnotes\n"
+        "Note. Detail may not add to total due to rounding.\n",
+        encoding="utf-8",
+    )
+    result = inspect_csv(path)
+    assert result.expected_column_count == 4
+    assert result.header_line == 4
+    assert result.preamble_rows == [1, 2]
+    assert result.header_continuation_rows == [5]
+    assert result.leading_empty_headers == [0]
+    assert result.inconsistent_column_count == []
+    assert result.numeric_columns["11"]["numeric_percentage"] == 100.0
+    assert result.status == "WARNING"

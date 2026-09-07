@@ -547,7 +547,10 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     # Inspect supplied optional numerical fields as well.  A malformed
     # optional field is reported, but it does not make unrelated diagnostics
     # unsafe to run.
-    for field_name in ("Y", "V", "imports", "exports", "employment", "satellites", "A_reference", "L_reference"):
+    # References are optional validation targets, not part of the core table
+    # structure.  Their parsing and numeric validity are reported by
+    # ``reference.py`` so a malformed reference cannot stop the core audit.
+    for field_name in ("Y", "V", "imports", "exports", "employment", "satellites"):
         value = getattr(io, field_name)
         if value is None:
             continue
@@ -774,8 +777,6 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         any(value is False for value in result.trade_labels_match.values()),
         result.y_shape == FAIL,
         result.v_shape == FAIL,
-        result.a_reference_shape == FAIL,
-        result.l_reference_shape == FAIL,
         bool(result.trade_representation_conflicts),
         "trade_source_conflict" in result.details,
         any(status == FAIL for status in result.trade_shape.values()),

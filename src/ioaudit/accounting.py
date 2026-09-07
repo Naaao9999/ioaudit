@@ -67,6 +67,9 @@ class AccountingDiagnostics:
     max_relative_residual: float | None = None
     convention_required: bool = True
     import_adjustment_applied: bool = False
+    input_adjustment_applied: bool = False
+    external_inputs_used: bool = False
+    input_adjustments_used: bool = False
     imports_used: bool = False
     exports_used: bool = False
     inflows_used: bool = False
@@ -115,6 +118,60 @@ def _aggregate_sector_vector(value: Any, *, name: str, n: int) -> tuple[np.ndarr
     return np.asarray(array, dtype=float), None
 
 
+def _input_adjustment_vector(
+    value: Any, *, name: str, n: int
+) -> tuple[np.ndarray | None, str | None]:
+    """Read signed user-specific input adjustments without guessing an axis.
+
+    A one-dimensional value is already aggregated by user sector.  A
+    two-dimensional value is interpreted as rows of external inputs and
+    columns of purchasing sectors, so it is summed over rows.  Other shapes
+    are deliberately rejected because v0.1 cannot infer their meaning.
+    """
+
+    if value is None:
+        return None, f"{name} was not supplied"
+    try:
+        array, bad = _numeric_array(value)
+    except Exception as exc:
+        return None, f"{name} could not be read: {exc}"
+    if array is None or bad or not _all_finite(array):
+        return None, f"{name} contains non-numeric or missing values"
+    shape = _shape_of(array)
+    if len(shape) == 1 and shape == (n,):
+        return np.asarray(array, dtype=float), None
+    if len(shape) == 2 and shape[1] == n:
+        return _axis_sum(array, 0), None
+    return None, f"{name} must have shape (n,) or (m, n)"
+
+
+def _resolve_input_adjustment(
+    io: Any, *, n: int
+) -> tuple[np.ndarray | None, str | None, str | None]:
+    """Resolve one explicit input-side adjustment source.
+
+    The two public fields are alternative representations.  Supplying both
+    is ambiguous and therefore skips the affected identity instead of adding
+    them and risking double counting.
+    """
+
+    external = getattr(io, "external_inputs_by_user", None)
+    adjustments = getattr(io, "input_adjustments_by_user", None)
+    if external is not None and adjustments is not None:
+        return None, "external_inputs_by_user and input_adjustments_by_user were supplied together", "conflict"
+    if adjustments is not None:
+        vector, reason = _input_adjustment_vector(
+            adjustments, name="input_adjustments_by_user", n=n
+        )
+        return vector, reason, "input_adjustments_by_user"
+    if external is not None:
+        vector, reason = _input_adjustment_vector(
+            external, name="external_inputs_by_user", n=n
+        )
+        return vector, reason, "external_inputs_by_user"
+    return None, "no input-side adjustment was supplied", None
+
+
 def _balance(
     residual: np.ndarray,
     x: np.ndarray,
@@ -128,7 +185,13 @@ def _balance(
     np.divide(absolute, np.abs(x), out=relative, where=nonzero_x)
     relative[(~nonzero_x) & (absolute != 0)] = np.inf
     finite_rel = relative[np.isfinite(relative)]
-    status = "PASS"
+    exact = bool(
+        np.all(
+            absolute
+            <= np.finfo(float).eps * np.maximum(1.0, np.abs(x))
+        )
+    )
+    status = "PASS" if exact else "AVAILABLE"
     if tolerance is not None:
         absolute_limit = float(tolerance.get("absolute", 0.0))
         relative_limit = float(tolerance.get("relative", 0.0))
@@ -136,7 +199,6 @@ def _balance(
         allowed = np.maximum(
             np.maximum(absolute_limit, relative_limit * np.abs(x)), rounding_unit
         )
-        exact = bool(np.all(absolute <= np.finfo(float).eps * np.maximum(1.0, np.abs(x))))
         within_tolerance = bool(np.all(absolute <= allowed))
         if not exact and within_tolerance:
             status = "ROUNDING_LEVEL"
@@ -327,6 +389,7 @@ def diagnose_accounting(
     inflow_sign = "positive" if legacy_noncompetitive else convention.inflow_sign
 
     if f is None:
+        result.formula = "output: SKIPPED because Y is unavailable"
         result.output_balance.reason = y_reason
     elif y_subtotal_risk:
         result.formula = "output: SKIPPED because Y contains a possible subtotal/total component"
@@ -429,30 +492,82 @@ def diagnose_accounting(
                             )
                             result.import_adjustment_applied = True
     if result.formula is None:
-        result.formula = (
-            "output: x = row_sum(Z) + row_sum(Y); "
-            "input: x = column_sum(Z) + column_sum(V)"
-        )
+        result.formula = "output: x = row_sum(Z) + row_sum(Y)"
     if output_residual is not None:
         result.output_balance = _balance(
             output_residual, x, output_equation, result.tolerance
         )
 
+    input_adjustment, input_adjustment_reason, input_adjustment_source = (
+        _resolve_input_adjustment(io, n=n)
+    )
+    input_equation = "input: SKIPPED"
     if v_subtotal_risk:
         result.input_balance.reason = (
             "V contains a possible subtotal/total component; the correct component subset was not inferred"
         )
-    elif v is not None:
-        result.input_balance = _balance(
-            x - (_axis_sum(z, 0) + v),
-            x,
-            "x = column_sum(Z) + column_sum(V)",
-            result.tolerance,
-        )
-    else:
+        input_equation = "input: SKIPPED because V contains a possible subtotal/total component"
+    elif v is None:
         result.input_balance.reason = v_reason
+        input_equation = "input: SKIPPED because V is unavailable"
+    elif convention.input_representation == "unknown":
+        result.input_balance.reason = (
+            "input_representation='unknown'; the completeness of V and any input-side adjustments is not declared"
+        )
+        input_equation = "input: SKIPPED because input_representation='unknown'"
+    elif convention.input_representation == "complete":
+        if input_adjustment_source is not None:
+            result.input_balance.reason = (
+                "input-side adjustment was supplied but input_representation='complete'; "
+                "the adjustment's relationship to V is ambiguous"
+            )
+            input_equation = "input: SKIPPED because a complete V conflicts with supplied input adjustment"
+        else:
+            input_equation = "input: x = column_sum(Z) + column_sum(V)"
+            result.input_balance = _balance(
+                x - (_axis_sum(z, 0) + v),
+                x,
+                "x = column_sum(Z) + column_sum(V)",
+                result.tolerance,
+            )
+    elif convention.input_representation == "adjustments_required":
+        if input_adjustment is None:
+            result.input_balance.reason = (
+                "input_representation='adjustments_required' but no valid signed "
+                "external input adjustment was supplied"
+            )
+            input_equation = "input: SKIPPED because input-side adjustment is unavailable"
+        else:
+            result.input_adjustment_applied = True
+            result.input_adjustments_used = input_adjustment_source == "input_adjustments_by_user"
+            result.external_inputs_used = input_adjustment_source == "external_inputs_by_user"
+            input_equation = (
+                "input: x = column_sum(Z) + column_sum(V) + input_adjustment"
+            )
+            result.input_balance = _balance(
+                x - (_axis_sum(z, 0) + v + input_adjustment),
+                x,
+                "x = column_sum(Z) + column_sum(V) + input_adjustment",
+                result.tolerance,
+            )
+    else:
+        result.input_balance.reason = (
+            f"unsupported input_representation={convention.input_representation!r}"
+        )
+        input_equation = "input: SKIPPED because input_representation is unsupported"
+
+    if input_adjustment_reason and input_adjustment_source is not None:
+        result.notes.append(input_adjustment_reason)
+    if input_adjustment_source is not None and input_adjustment is None:
+        result.input_balance.reason = input_adjustment_reason
+    if "input:" in result.formula:
+        output_formula = result.formula.split("; input:", 1)[0]
+    else:
+        output_formula = result.formula
+    result.formula = f"{output_formula}; {input_equation}"
     result.trade_adjusted_input_balance.reason = (
-        "SKIPPED: external_inputs_by_user is not supplied; product/commodity inflows are not used as user-specific inputs"
+        "SKIPPED: product/commodity inflows are not reused as user-specific inputs; "
+        "use input_representation='adjustments_required' with an explicit input-side adjustment"
     )
 
     balances = [result.input_balance, result.output_balance]

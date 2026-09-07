@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
+import pytest
 from scipy import sparse
 
-from ioaudit import IOSystem, audit
+from ioaudit import IOAuditError, IOSystem, audit
 
 
 def test_reference_matrices(normal_io):
@@ -37,3 +38,26 @@ def test_sparse_reference_comparison_uses_dense_numeric_values():
     )
     assert report.reference.A.status == "PASS"
     assert report.reference.A.relative_difference == 0
+
+
+def test_invalid_optional_reference_does_not_fail_core_structure_or_stop_audit(normal_io):
+    report = audit(
+        IOSystem(
+            normal_io.Z,
+            normal_io.x,
+            normal_io.sectors,
+            Y=normal_io.Y,
+            V=normal_io.V,
+            accounting=normal_io.accounting,
+            L_reference=pd.DataFrame([["..", 0.0], [0.0, 1.0]]),
+        )
+    )
+    assert report.structure.status == "PASS"
+    assert report.reference.status == "FAIL"
+    assert report.coefficients.status == "PASS"
+    assert report.stability.status == "PASS"
+    assert report.accounting.status == "AVAILABLE"
+    assert report.passed() is True
+    assert report.passed(fail_on_reference=True) is False
+    with pytest.raises(IOAuditError):
+        report.raise_for_status(fail_on_reference=True)

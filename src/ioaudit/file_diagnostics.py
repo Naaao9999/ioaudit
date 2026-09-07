@@ -81,9 +81,13 @@ class CSVInspectionReport:
     completely_blank_rows: list[int] = field(default_factory=list)
     inconsistent_column_count: list[dict[str, int]] = field(default_factory=list)
     expected_column_count: int | None = None
+    header_line: int | None = None
+    preamble_rows: list[int] = field(default_factory=list)
+    header_continuation_rows: list[int] = field(default_factory=list)
     trailing_delimiter: list[int] = field(default_factory=list)
     duplicate_headers: list[str] = field(default_factory=list)
     empty_headers: list[int] = field(default_factory=list)
+    leading_empty_headers: list[int] = field(default_factory=list)
     whitespace: list[dict[str, Any]] = field(default_factory=list)
     quoting_anomaly: bool = False
     quoting_error: str | None = None
@@ -241,7 +245,7 @@ def _status(report: CSVInspectionReport) -> str:
         or report.quoting_anomaly
         or report.inconsistent_column_count
         or report.duplicate_headers
-        or report.empty_headers
+        or any(index != 0 for index in report.empty_headers)
     )
     warning = bool(
         report.blank_lines
@@ -253,8 +257,42 @@ def _status(report: CSVInspectionReport) -> str:
         or report.unexpected_text_rows
         or report.repeated_header_rows
         or report.invisible_characters
+        or report.leading_empty_headers
     )
     return "FAIL" if critical else ("WARNING" if warning else "PASS")
+
+
+def _dominant_width(data_rows: Sequence[tuple[int, list[str]]]) -> int:
+    """Return the most representative width for a nonblank CSV body.
+
+    Title and note rows are often one-column rows in otherwise rectangular
+    files.  Prefer the most frequent multi-column width when one exists, and
+    fall back to the first nonblank row for genuinely one-column files.
+    """
+
+    widths = Counter(len(row) for _, row in data_rows)
+    multi_column = [(width, count) for width, count in widths.items() if width > 1]
+    if multi_column:
+        return max(multi_column, key=lambda item: (item[1], item[0]))[0]
+    return len(data_rows[0][1])
+
+
+def _looks_like_header_continuation(row: Sequence[str], width: int) -> bool:
+    """Identify a likely descriptive header row without extracting table data."""
+
+    if len(row) != width or width < 2 or row[0].strip():
+        return False
+    text_tokens = 0
+    for token in row[1:]:
+        stripped = token.strip()
+        if (
+            not _NUMBER_RE.fullmatch(stripped)
+            and not _THOUSANDS_RE.fullmatch(stripped)
+            and stripped not in _MISSING_TOKENS
+            and stripped not in _NAN_INF_TOKENS
+        ):
+            text_tokens += 1
+    return text_tokens >= max(2, int(0.75 * (width - 1)))
 
 
 def inspect_csv(
@@ -347,8 +385,18 @@ def inspect_csv(
         report.status = "SKIPPED"
         report.notes.append("No nonblank CSV rows were found")
         return report
-    header_line, header = data_rows[0]
-    report.expected_column_count = len(header)
+    report.expected_column_count = _dominant_width(data_rows)
+    header_position = next(
+        index
+        for index, (_, row) in enumerate(data_rows)
+        if len(row) == report.expected_column_count
+    )
+    header_line, header = data_rows[header_position]
+    report.header_line = header_line
+    report.preamble_rows = [
+        line_number
+        for line_number, _ in data_rows[:header_position]
+    ]
     used_headers: set[str] = set()
     header_keys: list[str] = []
     normalized_headers: list[str] = []
@@ -358,12 +406,27 @@ def inspect_csv(
         header_keys.append(_header_key(value, index, used_headers))
         if not normalized:
             report.empty_headers.append(index)
+            if index == 0:
+                # A blank leading stub column is common in exported tables:
+                # it holds row labels while the remaining fields are the
+                # rectangular header.  Keep the evidence but do not treat it
+                # like an unnamed data column in the critical gate.
+                report.leading_empty_headers.append(index)
     counts = Counter(normalized_headers)
     report.duplicate_headers = sorted(name for name, count in counts.items() if name and count > 1)
 
     all_rows_for_columns = [row for _, row in rows]
     for line_number, row in data_rows:
+        if line_number < header_line:
+            # A title or source row before the first rectangular row is file
+            # preamble, not a malformed table record.
+            continue
         if len(row) != report.expected_column_count:
+            if len(row) == 1:
+                text = row[0].strip()
+                if text:
+                    report.unexpected_text_rows.append({"line": line_number, "text": text})
+                continue
             report.inconsistent_column_count.append(
                 {"line": line_number, "expected": report.expected_column_count, "actual": len(row)}
             )
@@ -373,10 +436,10 @@ def inspect_csv(
             and line_number != header_line
         ):
             report.repeated_header_rows.append(line_number)
-        if len(row) == 1 and line_number != header_line:
-            first = row[0].strip()
-            if re.match(r"^(?:単位|注|備考|出典|Note|NOTE|Unit|Source)\b", first):
-                report.unexpected_text_rows.append({"line": line_number, "text": first})
+        if len(row) == report.expected_column_count and _looks_like_header_continuation(
+            row, report.expected_column_count
+        ):
+            report.header_continuation_rows.append(line_number)
         for index, token in enumerate(row):
             if token != token.strip():
                 report.whitespace.append(
@@ -402,8 +465,13 @@ def inspect_csv(
     }
     dot_decimal_count = 0
     comma_decimal_count = 0
-    for line_number, row in data_rows[1:]:
-        if len(row) != len(header):
+    for line_number, row in data_rows:
+        if (
+            line_number <= header_line
+            or len(row) != report.expected_column_count
+            or line_number in report.repeated_header_rows
+            or line_number in report.header_continuation_rows
+        ):
             continue
         for index, token in enumerate(row):
             key = header_keys[index]

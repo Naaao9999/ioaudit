@@ -30,3 +30,14 @@ def test_metadata_completeness_and_provenance():
     first.raise_for_status()
     assert first.provenance["thresholds"]["stability.spectral_radius"] == 1.0
     assert "provenance" in json.loads(first.to_json())
+
+
+def test_provenance_hash_includes_input_side_adjustments():
+    base = IOSystem(np.array([[1.0]]), np.array([2.0]), ["A"])
+    adjusted = IOSystem(
+        np.array([[1.0]]),
+        np.array([2.0]),
+        ["A"],
+        external_inputs_by_user=np.array([3.0]),
+    )
+    assert audit(base).provenance["input_hash"] != audit(adjusted).provenance["input_hash"]

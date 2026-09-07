@@ -55,7 +55,7 @@ def test_convention_serializes_import_sign():
     assert convention.to_dict()["import_sign"] == "positive"
 
 
-def test_plain_convention_is_conservative_and_japan_preset_is_explicit():
+def test_plain_convention_is_conservative_and_structural_presets_are_explicit():
     plain = AccountingConvention()
     assert plain.transaction_scope == "unknown"
     assert plain.import_treatment == "unknown"
@@ -63,6 +63,7 @@ def test_plain_convention_is_conservative_and_japan_preset_is_explicit():
     assert plain.external_flow_scope == "unknown"
     assert plain.inflow_sign == "unknown"
     assert plain.outflow_sign == "unknown"
+    assert plain.input_representation == "unknown"
 
     competitive = AccountingConvention.domestic_competitive()
     assert competitive.transaction_scope == "domestic"
@@ -71,6 +72,7 @@ def test_plain_convention_is_conservative_and_japan_preset_is_explicit():
     assert competitive.external_flow_scope == "international"
     assert competitive.inflow_sign == "negative"
     assert competitive.outflow_sign == "positive"
+    assert competitive.input_representation == "complete"
 
     noncompetitive = AccountingConvention.domestic_noncompetitive()
     assert noncompetitive.transaction_scope == "domestic"

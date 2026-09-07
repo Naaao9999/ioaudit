@@ -103,6 +103,12 @@ def input_hash(io: Any) -> str:
         "satellites": _canonical(getattr(io, "satellites", None)),
         "A_reference": _canonical(getattr(io, "A_reference", None)),
         "L_reference": _canonical(getattr(io, "L_reference", None)),
+        "external_inputs_by_user": _canonical(
+            getattr(io, "external_inputs_by_user", None)
+        ),
+        "input_adjustments_by_user": _canonical(
+            getattr(io, "input_adjustments_by_user", None)
+        ),
         "trade": trade_payload,
         "metadata": _canonical(getattr(io, "metadata", None)),
         "accounting": _canonical(
