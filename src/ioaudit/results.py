@@ -304,7 +304,7 @@ class AuditReport:
         max_spectral_radius: float | None = 1.0,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
-        fail_on_reference: bool = False,
+        fail_on_invalid_reference: bool = False,
         raise_invalid: bool = False,
     ) -> tuple[list[str], dict[str, float]]:
         """Evaluate all CI gate rules and return failures plus active limits."""
@@ -319,7 +319,9 @@ class AuditReport:
 
         failures: list[str] = []
         if fail_on_boolean:
-            failures.extend(self._boolean_failures(include_reference=fail_on_reference))
+            failures.extend(
+                self._boolean_failures(include_reference=fail_on_invalid_reference)
+            )
         if require_complete:
             failures.extend(self._completeness_failures())
         failures.extend(self._availability_failures(require_available))
@@ -333,7 +335,7 @@ class AuditReport:
         max_spectral_radius: float = 1.0,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
-        fail_on_reference: bool = False,
+        fail_on_invalid_reference: bool = False,
     ) -> None:
         """Raise :class:`IOAuditError` when configured checks fail.
 
@@ -342,8 +344,8 @@ class AuditReport:
         default remains permissive because Y, V, references, and conventions
         are optional in the v0.1 API.
 
-        ``fail_on_reference=True`` explicitly includes an invalid optional
-        reference matrix in the boolean gate.
+        ``fail_on_invalid_reference=True`` explicitly includes an invalid
+        optional reference matrix in the boolean gate.
         """
 
         failures, thresholds = self._gate_failures(
@@ -352,7 +354,7 @@ class AuditReport:
             max_spectral_radius=max_spectral_radius,
             require_complete=require_complete,
             require_available=require_available,
-            fail_on_reference=fail_on_reference,
+            fail_on_invalid_reference=fail_on_invalid_reference,
             raise_invalid=True,
         )
         self.thresholds.update(thresholds)
@@ -369,14 +371,14 @@ class AuditReport:
         max_spectral_radius: float | None = 1.0,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
-        fail_on_reference: bool = False,
+        fail_on_invalid_reference: bool = False,
     ) -> bool:
         """Return whether checks and supplied thresholds pass.
 
         By default, optional or unavailable diagnostics do not fail this
         boolean gate.  Set ``require_complete=True`` when both accounting
         sides and downstream numerical diagnostics must be available.
-        Set ``fail_on_reference=True`` to include an invalid optional
+        Set ``fail_on_invalid_reference=True`` to include an invalid optional
         reference matrix in the boolean gate.
         """
 
@@ -387,7 +389,7 @@ class AuditReport:
             max_spectral_radius=max_spectral_radius,
             require_complete=require_complete,
             require_available=require_available,
-            fail_on_reference=fail_on_reference,
+            fail_on_invalid_reference=fail_on_invalid_reference,
         )
         return not failures
 
@@ -395,6 +397,7 @@ class AuditReport:
         """Return a short human-readable audit summary."""
 
         structure_status = getattr(self.structure, "status", "SKIPPED")
+        supporting_status = getattr(self.structure, "supporting_status", "SKIPPED")
         orientation_status = getattr(self.orientation, "status", "SKIPPED")
         accounting_status = getattr(self.accounting, "status", "SKIPPED")
         invertible = getattr(self.stability, "invertible", None)
@@ -410,6 +413,7 @@ class AuditReport:
             "IO Audit Report",
             "===============",
             f"Structure                {structure_status}",
+            f"Supporting inputs       {supporting_status}",
             f"Orientation              {orientation_status}",
             f"Accounting               {accounting_status}",
             f"Signs                    {negative_count} negative entries",

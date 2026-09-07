@@ -206,6 +206,9 @@ AccountingConvention.total_transactions()
 があります。これらは国名ではなく、会計構造を表すpresetです。
 `domestic_competitive()` と `domestic_noncompetitive()` は、それぞれ取引範囲と輸入処理だけを固定します。交易の格納方法、符号、投入側の完全性は推測せず、必要に応じて明示してください。
 
+`total_transactions()` は `transaction_scope="total"` と
+`import_treatment="none"` を固定しますが、付加価値ブロックが投入側を完全に説明するかどうかは推測せず、`input_representation="unknown"` とします。
+
 すべて明示することもできます。
 
 ```python
@@ -737,6 +740,8 @@ io = IOSystem(
 
 2次元の外部投入調整では、DataFrameの列が購入部門を表します。列ラベルが `sectors` と順序まで一致しない場合、位置ベースの加算を行わず投入側会計を `SKIPPED` にします。Unicode・空白の正規化後だけ一致する場合は、宣言された順序で使用し、WARNINGを記録します。
 
+同じラベル方針は `Z`、`x`、`Y`、`V`、TradeFlowsにも適用されます。正規化後にも不一致が残る場合、位置ベースの下流計算を行わず、影響する診断だけを `SKIPPED` にします。TradeFlowsとinput adjustmentsの不備は、表本体の `structure` とは分離した `structure.supporting_status` に記録します。
+
 If `V` contains only domestic value-added items and user-specific external input adjustments are required, declare `input_representation="adjustments_required"`. The signed `input_adjustments` value can have shape `(n,)` or `(m, n)`; the latter is summed over input rows. `input_representation="unknown"` never infers whether `V` is complete.
 
 ### Competitive import sign convention / 競争輸入の符号規約
@@ -840,9 +845,9 @@ report.raise_for_status(require_available=["accounting.output_balance"])
 
 `require_available` は指定したオブジェクトが存在し、`status != "SKIPPED"` であることを要求します。`reference.A` のような任意の診断にも使えます。
 
-Reference行列が不正な場合も、既定の `report.passed()` は表本体の診断結果を維持します。Referenceを明示的にゲートへ含める場合は `fail_on_reference=True` を指定します。`require_available` で指定した診断は、存在するだけでなく `FAIL` でも失敗になります。
+Reference行列が不正な場合も、既定の `report.passed()` は表本体の診断結果を維持します。Referenceの形式不備を明示的にゲートへ含める場合は `fail_on_invalid_reference=True` を指定します。`require_available` で指定した診断は、存在するだけでなく `FAIL` でも失敗になります。
 
-Invalid optional reference matrices do not fail the core `report.passed()` gate by default. Use `fail_on_reference=True` to include reference validity explicitly. A path supplied to `require_available` must exist and must not be `SKIPPED` or `FAIL`.
+Invalid optional reference matrices do not fail the core `report.passed()` gate by default. Use `fail_on_invalid_reference=True` to include reference validity explicitly. A path supplied to `require_available` must exist and must not be `SKIPPED` or `FAIL`.
 
 The default gate allows optional diagnostics to be unavailable. Use `require_complete=True` when the accounting sides and downstream numerical diagnostics must all be available, or `require_available=[...]` to require selected report paths only.
 

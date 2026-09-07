@@ -28,7 +28,31 @@ def axis_sum(value: Any, axis: int) -> np.ndarray:
     return np.asarray(summed, dtype=float).reshape(-1)
 
 
-def vector(value: Any, *, expected: str, n: int) -> tuple[np.ndarray | None, str | None]:
+def _check_sector_alignment(
+    labels: list[Any] | None,
+    sectors: list[Any] | None,
+    *,
+    name: str,
+    axis: str,
+) -> str | None:
+    """Validate a labelled sector axis without reordering source values."""
+
+    if labels is None or sectors is None:
+        return None
+    exact = _same_labels(labels, sectors)
+    normalized = _same_normalized_labels(labels, sectors)
+    if exact is False and normalized is not True:
+        return f"{name} {axis} do not match sectors in order"
+    return None
+
+
+def vector(
+    value: Any,
+    *,
+    expected: str,
+    n: int,
+    sectors: list[Any] | None = None,
+) -> tuple[np.ndarray | None, str | None]:
     """Read an accounting vector from Y or V using its declared axis."""
 
     if value is None:
@@ -41,21 +65,49 @@ def vector(value: Any, *, expected: str, n: int) -> tuple[np.ndarray | None, str
         return None, f"{expected} contains non-numeric or missing values"
     if expected == "Y":
         if getattr(array, "ndim", None) == 1 and array.shape == (n,):
+            index, _ = _labels(value)
+            alignment_error = _check_sector_alignment(
+                index, sectors, name="Y", axis="index"
+            )
+            if alignment_error:
+                return None, alignment_error
             return np.asarray(array, dtype=float), None
         if getattr(array, "ndim", None) == 2 and array.shape[0] == n:
+            index, _ = _labels(value)
+            alignment_error = _check_sector_alignment(
+                index, sectors, name="Y", axis="index"
+            )
+            if alignment_error:
+                return None, alignment_error
             return axis_sum(array, 1), None
         return None, "Y must have shape (n,) or (n, k)"
     if expected == "V":
         if getattr(array, "ndim", None) == 1 and array.shape == (n,):
+            index, _ = _labels(value)
+            alignment_error = _check_sector_alignment(
+                index, sectors, name="V", axis="index"
+            )
+            if alignment_error:
+                return None, alignment_error
             return np.asarray(array, dtype=float), None
         if getattr(array, "ndim", None) == 2 and array.shape[1] == n:
+            _, columns = _labels(value)
+            alignment_error = _check_sector_alignment(
+                columns, sectors, name="V", axis="columns"
+            )
+            if alignment_error:
+                return None, alignment_error
             return axis_sum(array, 0), None
         return None, "V must have shape (n,) or (m, n)"
     return None, f"unsupported accounting input {expected}"
 
 
 def aggregate_sector_vector(
-    value: Any, *, name: str, n: int
+    value: Any,
+    *,
+    name: str,
+    n: int,
+    sectors: list[Any] | None = None,
 ) -> tuple[np.ndarray | None, str | None]:
     """Read a one-dimensional flow with an explicit sector axis."""
 
@@ -69,6 +121,12 @@ def aggregate_sector_vector(
         return None, f"{name} contains non-numeric or missing values"
     if getattr(array, "ndim", None) != 1 or array.shape != (n,):
         return None, f"{name} must have explicit shape (n,) for v0.1 accounting"
+    index, _ = _labels(value)
+    alignment_error = _check_sector_alignment(
+        index, sectors, name=name, axis="index"
+    )
+    if alignment_error:
+        return None, alignment_error
     return np.asarray(array, dtype=float), None
 
 
@@ -141,6 +199,7 @@ def trade_side(
     side: str,
     scope: str,
     n: int,
+    sectors: list[Any] | None = None,
 ) -> tuple[np.ndarray | None, str | None, str | None]:
     """Resolve one trade side as a combined or complete split representation."""
 
@@ -176,7 +235,7 @@ def trade_side(
         return None, f"combined and split {side} were supplied together", None
     if combined is not None:
         value, reason = aggregate_sector_vector(
-            combined, name=f"trade.{combined_name}", n=n
+            combined, name=f"trade.{combined_name}", n=n, sectors=sectors
         )
         return value, reason, combined_name if value is not None else None
     if not all(present):
@@ -185,7 +244,7 @@ def trade_side(
     vectors: list[np.ndarray] = []
     for name in names:
         value, reason = aggregate_sector_vector(
-            getattr(trade, name), name=f"trade.{name}", n=n
+            getattr(trade, name), name=f"trade.{name}", n=n, sectors=sectors
         )
         if value is None:
             return None, reason, None

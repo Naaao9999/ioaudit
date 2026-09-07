@@ -133,7 +133,13 @@ class AccountingConvention:
 
     @classmethod
     def total_transactions(cls) -> "AccountingConvention":
-        """Return an explicit convention for a total-transactions table."""
+        """Return a total-transactions convention with input completeness explicit.
+
+        The table scope and absence of a separate import treatment are fixed
+        by the preset name.  Whether the supplied value-added block closes the
+        input identity remains source-table metadata and is therefore left
+        unknown unless the caller declares it.
+        """
 
         return cls(
             transaction_scope="total",
@@ -142,7 +148,7 @@ class AccountingConvention:
             external_flow_scope="unknown",
             inflow_sign="unknown",
             outflow_sign="unknown",
-            input_representation="complete",
+            input_representation="unknown",
         )
 
     def to_dict(self) -> dict[str, str]:

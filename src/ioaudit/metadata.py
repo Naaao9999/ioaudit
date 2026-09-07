@@ -16,7 +16,12 @@ class MetadataDiagnostics:
         default_factory=lambda: ["year", "unit", "price_basis"]
     )
     recommended_fields: list[str] = field(
-        default_factory=lambda: ["currency", "valuation"]
+        default_factory=lambda: [
+            "currency",
+            "valuation",
+            "symmetric_dimension",
+            "classification",
+        ]
     )
     missing_required: list[str] = field(default_factory=list)
     missing_recommended: list[str] = field(default_factory=list)

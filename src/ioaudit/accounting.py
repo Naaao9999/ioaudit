@@ -17,7 +17,7 @@ from ._balance_core import (
     vector as _vector,
 )
 from .conventions import AccountingConvention
-from .structure import _all_finite, _shape_of
+from .structure import _all_finite, _core_inputs_are_safe, _shape_of
 
 
 @dataclass
@@ -139,6 +139,7 @@ def diagnose_accounting(
     *,
     tolerance: dict[str, float] | None = None,
     components: Any = None,
+    structure: Any = None,
 ) -> AccountingDiagnostics:
     """Compute declared input/output identities without inferring trade."""
 
@@ -151,13 +152,22 @@ def diagnose_accounting(
     if z is None or x is None or len(z_shape) != 2 or z_shape[0] != z_shape[1] or getattr(x, "ndim", None) != 1 or len(x) != z_shape[0]:
         result.notes.append("Z and x do not have a safe square/numeric shape")
         return result
+    if structure is not None and not _core_inputs_are_safe(structure):
+        result.notes.append(
+            "Z, x, or their sector labels are not safely aligned; accounting checks are SKIPPED"
+        )
+        return result
     n = z_shape[0]
     if not _all_finite(z) or not _all_finite(x):
         result.notes.append("Z or x contains NaN/Inf")
         return result
 
-    f, y_reason = _vector(io.Y, expected="Y", n=n)
-    v, v_reason = _vector(io.V, expected="V", n=n)
+    f, y_reason = _vector(
+        io.Y, expected="Y", n=n, sectors=sectors
+    )
+    v, v_reason = _vector(
+        io.V, expected="V", n=n, sectors=sectors
+    )
     component_risks = getattr(components, "double_count_risk", []) if components is not None else []
     y_subtotal_risk = any(item.get("field") == "Y" for item in component_risks)
     v_subtotal_risk = any(item.get("field") == "V" for item in component_risks)
@@ -219,7 +229,11 @@ def diagnose_accounting(
         result.notes.append("outflow_sign not applicable")
     else:
         inflows, inflow_reason, inflow_label = _trade_side(
-            trade, side="inflows", scope=convention.external_flow_scope, n=n
+            trade,
+            side="inflows",
+            scope=convention.external_flow_scope,
+            n=n,
+            sectors=sectors,
         )
         if inflows is None:
             result.output_balance.reason = inflow_reason
@@ -255,7 +269,11 @@ def diagnose_accounting(
                     result.notes.append("outflow_sign not applicable")
                 else:
                     outflows, outflow_reason, outflow_label = _trade_side(
-                        trade, side="outflows", scope=convention.external_flow_scope, n=n
+                        trade,
+                        side="outflows",
+                        scope=convention.external_flow_scope,
+                        n=n,
+                        sectors=sectors,
                     )
                     if outflows is None:
                         result.output_balance.reason = outflow_reason

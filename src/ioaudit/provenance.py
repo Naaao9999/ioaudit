@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import platform
+import sys
 from typing import Any
 
 import numpy as np
@@ -138,6 +140,12 @@ def build_provenance(
             "cell_reason": getattr(scale, "cell_reason", None),
         }
     selected_method = getattr(methods, "numerical_method", None)
+    try:
+        import scipy
+    except Exception:
+        scipy_version = None
+    else:
+        scipy_version = scipy.__version__
     return {
         "ioaudit_version": version,
         "input_hash": input_hash(io),
@@ -147,5 +155,13 @@ def build_provenance(
         "selected_numerical_method": selected_method,
         "accounting_tolerance": _canonical(accounting_tolerance),
         "scale": scale_manifest,
+        "environment": {
+            "python_version": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "numpy_version": np.__version__,
+            "pandas_version": pd.__version__,
+            "scipy_version": scipy_version,
+            "platform": sys.platform,
+        },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

@@ -165,6 +165,49 @@ def _same_normalized_labels(
     return _same_labels(normalized_left, normalized_right)
 
 
+def _alignment_is_safe(exact: bool | None, normalized: bool | None) -> bool:
+    """Return whether positional use is safe under the label policy.
+
+    Unlabelled arrays are positional by definition.  A normalized-only match
+    is also safe because normalization preserves the declared order.  A
+    genuine mismatch is unsafe and must prevent dependent calculations from
+    consuming the values positionally.
+    """
+
+    return exact is not False or normalized is True
+
+
+def _core_inputs_are_safe(result: Any) -> bool:
+    """Return whether Z, x, and the sector axis are safe for derived math."""
+
+    required = (
+        result.z_is_2d == PASS,
+        result.z_is_square == PASS,
+        result.x_length_matches == PASS,
+        result.sectors_length_matches == PASS,
+        result.non_numeric is not True
+        or not ({"Z", "x"} & set(result.details.get("non_numeric_fields", []))),
+        not ({"Z", "x"} & set(result.details.get("nan_fields", []))),
+        not ({"Z", "x"} & set(result.details.get("inf_fields", []))),
+        result.duplicate_sector_ids is not True,
+        not bool(result.details.get("core_normalized_duplicates")),
+        _alignment_is_safe(
+            result.row_column_labels_match,
+            result.normalized_row_column_labels_match,
+        ),
+        _alignment_is_safe(
+            result.z_row_labels_match_sectors,
+            result.normalized_z_row_labels_match_sectors,
+        ),
+        _alignment_is_safe(
+            result.z_column_labels_match_sectors,
+            result.normalized_z_column_labels_match_sectors,
+        ),
+        _alignment_is_safe(result.x_labels_match, result.normalized_x_labels_match),
+    )
+    return all(required)
+
+
 def _duplicate_normalized_labels(
     labels: list[Any] | None, dimension: str
 ) -> list[dict[str, Any]]:
@@ -297,6 +340,10 @@ class StructureDiagnostics:
     normalized_row_column_labels_match: bool | None = None
     exact_labels_match: bool | None = None
     normalized_labels_match: bool | None = None
+    z_row_labels_match_sectors: bool | None = None
+    normalized_z_row_labels_match_sectors: bool | None = None
+    z_column_labels_match_sectors: bool | None = None
+    normalized_z_column_labels_match_sectors: bool | None = None
     x_labels_match: bool | None = None
     normalized_x_labels_match: bool | None = None
     y_labels_match: bool | None = None
@@ -319,6 +366,9 @@ class StructureDiagnostics:
     duplicate_labels_after_normalization: list[dict[str, Any]] = field(default_factory=list)
     trade_representation_conflicts: list[str] = field(default_factory=list)
     trade_shape: dict[str, str] = field(default_factory=dict)
+    supporting_status: str = SKIPPED
+    supporting_failures: list[str] = field(default_factory=list)
+    supporting_warnings: list[str] = field(default_factory=list)
     n_rows: int | None = None
     n_columns: int | None = None
     details: dict[str, Any] = field(default_factory=dict)
@@ -507,11 +557,14 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
 
     z_numeric, bad = _numeric_array(io.Z)
     non_numeric_fields: list[str] = ["Z"] if bad else []
+    supporting_non_numeric_fields: list[str] = []
     result.non_numeric = bool(bad)
     result.non_numeric_locations = bad
     finite_fields_seen = False
     nan_fields: list[str] = []
     inf_fields: list[str] = []
+    supporting_nan_fields: list[str] = []
+    supporting_inf_fields: list[str] = []
     if z_numeric is not None and len(z_numeric.shape) == 2:
         arrays["Z"] = z_numeric
         finite_fields_seen = True
@@ -579,11 +632,10 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
             field_array, field_bad = _numeric_array(value)
             qualified_name = f"trade.{field_name}"
             if field_bad:
-                non_numeric_fields.append(qualified_name)
+                supporting_non_numeric_fields.append(qualified_name)
                 result.details[f"{qualified_name}_non_numeric_locations"] = field_bad
                 continue
             if field_array is not None:
-                finite_fields_seen = True
                 if result.n_rows is not None:
                     result.trade_shape[qualified_name] = (
                         PASS if _shape_of(field_array) == (result.n_rows,) else FAIL
@@ -599,17 +651,22 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
                     )
                 field_nan, field_inf = _nonfinite_flags(field_array)
                 if field_nan:
-                    nan_fields.append(qualified_name)
+                    supporting_nan_fields.append(qualified_name)
                 if field_inf:
-                    inf_fields.append(qualified_name)
+                    supporting_inf_fields.append(qualified_name)
     result.non_numeric = bool(non_numeric_fields)
     result.details["non_numeric_fields"] = non_numeric_fields
+    result.details["supporting_non_numeric_fields"] = supporting_non_numeric_fields
     result.nan_exists = bool(nan_fields) if finite_fields_seen else None
     result.inf_exists = bool(inf_fields) if finite_fields_seen else None
     if nan_fields:
         result.details["nan_fields"] = nan_fields
     if inf_fields:
         result.details["inf_fields"] = inf_fields
+    if supporting_nan_fields:
+        result.details["supporting_nan_fields"] = supporting_nan_fields
+    if supporting_inf_fields:
+        result.details["supporting_inf_fields"] = supporting_inf_fields
     result.sectors_length_matches = (
         PASS if result.n_rows is not None and len(io.sectors) == result.n_rows else FAIL
     )
@@ -618,15 +675,35 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     except Exception:
         result.duplicate_sector_ids = True
 
+    expected_sector_labels = list(io.sectors) if result.n_rows == len(io.sectors) else None
     z_index, z_columns = _labels(io.Z)
     result.row_column_labels_match = _same_labels(z_index, z_columns)
     result.normalized_row_column_labels_match = _same_normalized_labels(z_index, z_columns)
+    result.z_row_labels_match_sectors = (
+        _same_labels(z_index, expected_sector_labels)
+        if z_index is not None and expected_sector_labels is not None
+        else None
+    )
+    result.normalized_z_row_labels_match_sectors = (
+        _same_normalized_labels(z_index, expected_sector_labels)
+        if z_index is not None and expected_sector_labels is not None
+        else None
+    )
+    result.z_column_labels_match_sectors = (
+        _same_labels(z_columns, expected_sector_labels)
+        if z_columns is not None and expected_sector_labels is not None
+        else None
+    )
+    result.normalized_z_column_labels_match_sectors = (
+        _same_normalized_labels(z_columns, expected_sector_labels)
+        if z_columns is not None and expected_sector_labels is not None
+        else None
+    )
     x_index, _ = _labels(io.x)
     result.x_labels_match = _same_labels(x_index, list(io.sectors)) if x_index is not None else None
     result.normalized_x_labels_match = (
         _same_normalized_labels(x_index, list(io.sectors)) if x_index is not None else None
     )
-    expected_sector_labels = list(io.sectors) if result.n_rows == len(io.sectors) else None
     y_index, y_columns = _labels(io.Y)
     result.y_labels_match = (
         _same_labels(y_index, expected_sector_labels)
@@ -675,11 +752,11 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         value
         for value in (
             result.row_column_labels_match,
+            result.z_row_labels_match_sectors,
+            result.z_column_labels_match_sectors,
             result.x_labels_match,
             result.y_labels_match,
             result.v_labels_match,
-            result.input_adjustment_labels_match,
-            *result.trade_labels_match.values(),
         )
         if value is not None
     ]
@@ -687,11 +764,11 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         value
         for value in (
             result.normalized_row_column_labels_match,
+            result.normalized_z_row_labels_match_sectors,
+            result.normalized_z_column_labels_match_sectors,
             result.normalized_x_labels_match,
             result.normalized_y_labels_match,
             result.normalized_v_labels_match,
-            result.normalized_input_adjustment_labels_match,
-            *result.normalized_trade_labels_match.values(),
         )
         if value is not None
     ]
@@ -735,6 +812,117 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.duplicate_labels_after_normalization.extend(
             _duplicate_normalized_labels(field_index, "input_adjustments.index")
         )
+
+    supporting_dimensions = {
+        "input_adjustments.columns",
+        "input_adjustments.index",
+    }
+    core_normalized_duplicates = [
+        duplicate
+        for duplicate in result.duplicate_labels_after_normalization
+        if duplicate.get("dimension") not in supporting_dimensions
+        and not str(duplicate.get("dimension", "")).startswith("trade.")
+    ]
+    supporting_normalized_duplicates = [
+        duplicate
+        for duplicate in result.duplicate_labels_after_normalization
+        if duplicate.get("dimension") in supporting_dimensions
+        or str(duplicate.get("dimension", "")).startswith("trade.")
+    ]
+    result.details["core_normalized_duplicates"] = core_normalized_duplicates
+    result.details["supporting_normalized_duplicates"] = supporting_normalized_duplicates
+
+    normalized_label_warnings: list[str] = []
+    for name, exact, normalized in (
+        ("Z row labels / sectors", result.z_row_labels_match_sectors, result.normalized_z_row_labels_match_sectors),
+        ("Z column labels / sectors", result.z_column_labels_match_sectors, result.normalized_z_column_labels_match_sectors),
+        ("Z row / column labels", result.row_column_labels_match, result.normalized_row_column_labels_match),
+        ("x labels / sectors", result.x_labels_match, result.normalized_x_labels_match),
+        ("Y labels / sectors", result.y_labels_match, result.normalized_y_labels_match),
+        ("V labels / sectors", result.v_labels_match, result.normalized_v_labels_match),
+    ):
+        if exact is False and normalized is True:
+            normalized_label_warnings.append(
+                f"{name} match only after Unicode/whitespace normalization"
+            )
+    result.details["normalized_label_warnings"] = normalized_label_warnings
+
+    # Trade flows and input adjustments support accounting checks but are not
+    # part of the core Z/x/Y/V table.  Keep their failures local so a bad
+    # supporting vector does not prevent coefficients or stability from being
+    # audited for an otherwise valid core table.
+    supporting_present = value is not None or (
+        trade is not None and trade.has_any
+    )
+    supporting_failures: list[str] = []
+    supporting_warnings: list[str] = []
+    if value is not None:
+        adjustment_array, adjustment_bad = _numeric_array(value)
+        if adjustment_bad or adjustment_array is None:
+            supporting_failures.append("input_adjustments contains non-numeric values")
+        elif result.n_rows is not None:
+            adjustment_shape = _shape_of(adjustment_array)
+            if adjustment_shape not in {
+                (result.n_rows,),
+                (result.n_rows, result.n_rows),
+            } and not (
+                len(adjustment_shape) == 2 and adjustment_shape[1] == result.n_rows
+            ):
+                supporting_failures.append(
+                    "input_adjustments must have shape (n,) or (m, n)"
+                )
+            if not _all_finite(adjustment_array):
+                supporting_failures.append("input_adjustments contains NaN/Inf")
+        if (
+            result.input_adjustment_labels_match is False
+            and result.normalized_input_adjustment_labels_match is True
+        ):
+            supporting_warnings.append(
+                "input_adjustments labels match sectors only after Unicode/whitespace normalization"
+            )
+        elif (
+            result.input_adjustment_labels_match is False
+            and result.normalized_input_adjustment_labels_match is not True
+        ):
+            supporting_failures.append("input_adjustments labels do not match sectors")
+
+    for qualified_name, exact in result.trade_labels_match.items():
+        normalized = result.normalized_trade_labels_match.get(qualified_name)
+        if exact is False and normalized is True:
+            supporting_warnings.append(
+                f"{qualified_name} labels match sectors only after Unicode/whitespace normalization"
+            )
+        elif exact is False and normalized is not True:
+            supporting_failures.append(f"{qualified_name} labels do not match sectors")
+    supporting_failures.extend(
+        f"{name} has invalid shape" for name, status in result.trade_shape.items() if status == FAIL
+    )
+    if result.trade_representation_conflicts:
+        supporting_failures.append(
+            "combined and split trade representations were supplied together"
+        )
+    supporting_failures.extend(
+        f"{name} contains non-numeric values" for name in supporting_non_numeric_fields
+    )
+    supporting_failures.extend(
+        f"{name} contains NaN/Inf" for name in supporting_nan_fields + supporting_inf_fields
+    )
+    if supporting_normalized_duplicates:
+        supporting_failures.append(
+            "supporting labels are duplicated after Unicode/whitespace normalization"
+        )
+    result.supporting_failures = sorted(set(supporting_failures))
+    result.supporting_warnings = sorted(set(supporting_warnings))
+    if result.supporting_failures:
+        result.supporting_status = FAIL
+    elif result.supporting_warnings:
+        result.supporting_status = WARNING
+    elif supporting_present:
+        result.supporting_status = PASS
+    else:
+        result.supporting_status = SKIPPED
+    result.details["supporting_failures"] = result.supporting_failures
+    result.details["supporting_warnings"] = result.supporting_warnings
     if len(z_shape) == 2:
         result.possible_total_rows = _total_candidates(
             io.Z, _dimension_labels(io, 0, z_shape[0]), axis=0
@@ -783,19 +971,24 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         bool(result.nan_exists),
         bool(result.inf_exists),
         result.duplicate_sector_ids is True,
-        result.row_column_labels_match is False,
-        result.x_labels_match is False,
-        result.y_labels_match is False,
-        result.v_labels_match is False,
-        (
-            result.input_adjustment_labels_match is False
-            and result.normalized_input_adjustment_labels_match is not True
+        not _alignment_is_safe(
+            result.row_column_labels_match,
+            result.normalized_row_column_labels_match,
         ),
-        any(value is False for value in result.trade_labels_match.values()),
+        not _alignment_is_safe(
+            result.z_row_labels_match_sectors,
+            result.normalized_z_row_labels_match_sectors,
+        ),
+        not _alignment_is_safe(
+            result.z_column_labels_match_sectors,
+            result.normalized_z_column_labels_match_sectors,
+        ),
+        not _alignment_is_safe(result.x_labels_match, result.normalized_x_labels_match),
+        not _alignment_is_safe(result.y_labels_match, result.normalized_y_labels_match),
+        not _alignment_is_safe(result.v_labels_match, result.normalized_v_labels_match),
+        bool(core_normalized_duplicates),
         result.y_shape == FAIL,
         result.v_shape == FAIL,
-        bool(result.trade_representation_conflicts),
-        any(status == FAIL for status in result.trade_shape.values()),
     ]
     result.status = FAIL if any(required_failures) else PASS
     return result, arrays
