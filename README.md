@@ -2,27 +2,21 @@
 
 **Preflight diagnostics for input-output tables.**
 
-`ioaudit` は、産業連関表を分析へ投入する前に、データ構造、行列の向き、会計整合性、投入係数、Leontief 系の数値安定性、外部参照行列との差を機械的に診断する Python ライブラリです。
+[日本語](README.ja.md)
 
-`ioaudit` mechanically audits an input-output table before it is used in analysis. It checks data structure, matrix orientation, accounting identities, technical coefficients, Leontief-system stability, and differences from reference matrices.
+`ioaudit` is a Python library for checking input-output tables **before** they are passed to analytical code.
 
-## Purpose / 目的
+It audits data structure, accounting consistency, matrix orientation, zero-output sectors, possible subtotal double counting, powers-of-ten scale errors, and numerical stability in Leontief systems.
 
-ioaudit の目的は、入力表にありがちな silent error を分析前に見つけることです。入力値や行列を自動修正せず、診断結果と根拠を返します。
+> **Diagnose, do not repair.**
 
-The goal is to find common silent errors before analysis. The library returns diagnostics and evidence; it does not silently modify the input table or infer missing accounting conventions.
+`ioaudit` reports problems and ambiguity, but it does not silently transpose, rebalance, delete, rescale, or otherwise repair the supplied table. When required information is unavailable, the affected diagnostic is reported as `SKIPPED` rather than inferred.
 
-## Installation / インストール
+---
 
-```bash
-pip install -e .
-```
+## Quickstart
 
-Python 3.10 以上が必要です。
-
-Python 3.10 or later is required.
-
-## Quickstart / 基本利用
+At minimum, an audit requires a transaction matrix `Z`, an output vector `x`, and sector identifiers.
 
 ```python
 import numpy as np
@@ -46,44 +40,129 @@ report = audit(io)
 print(report.summary())
 ```
 
-最低限、取引行列 `Z`、産出額 `x`、部門名 `sectors` があれば監査できます。Y/Vや `AccountingConvention` を指定すると、会計監査が追加されます。
-
-At minimum, an audit can be run with the transaction matrix `Z`, output vector `x`, and sector identifiers. Adding `Y`, `V`, and an explicit `AccountingConvention` enables accounting diagnostics.
-
-個別の診断結果には、例えば次のようにアクセスできます。
+Individual diagnostics are available through the returned `AuditReport`:
 
 ```python
-print(report.structure.status)
-print(report.orientation.possible_transpose)
-print(report.stability.spectral_radius)
-print(report.scale.possible_cell_scale_errors)
+report.structure
+report.orientation
+report.accounting
+report.zero_output
+report.coefficients
+report.stability
+report.scale
+report.components
+report.metadata
+report.provenance
 ```
 
-The public entry points are `IOSystem`, `TradeFlows`, `AccountingConvention`, and `audit`. Reports also provide `summary()`, `to_dict()`, `to_json()`, and `to_dataframe()`.
+---
 
-会計情報が不足している診断は、値を推測せず `SKIPPED` になります。
+## What does ioaudit check?
 
-Diagnostics that require unavailable accounting information are marked `SKIPPED` rather than inferred.
+Depending on the available inputs, `audit()` evaluates the following areas.
 
-## Design principle / 設計原則
+### Structure
 
-**diagnose, do not repair**
+- whether `Z` is two-dimensional and square
+- whether `x` and sector dimensions are aligned
+- NaN, Inf, and non-numeric values
+- row, column, and sector-label alignment
+- duplicate labels
+- duplicates revealed after Unicode and whitespace normalization
+- possible total rows, total columns, and non-sector content in `Z`
+- exact duplicate rows and columns
 
-ioaudit は入力データを自動修正しません。整合的なゼロ産出部門は、元の `IOSystem` を変更せず、計算上の係数列を安全にゼロとして扱います。ゼロ産出なのに取引列が非ゼロの部門は係数・Leontief計算を `SKIPPED` にして、見かけ上の解を作りません。
+### Orientation
 
-ioaudit never repairs input data. A consistent zero-output sector is handled as a zero coefficient column during calculations without changing the original `IOSystem`. If a zero-output sector has nonzero transactions, coefficient and Leontief calculations are marked `SKIPPED` rather than producing a misleading result.
+- row/column label consistency
+- sector ordering
+- alignment of `x`
+- accounting evidence under the supplied orientation versus the transpose
+- `possible_transpose`
 
-輸入の扱いは `AccountingConvention` で宣言し、輸入ベクトルの存在だけから会計式を推測しません。
+A possible transpose is reported as evidence only. The matrix is never transposed automatically.
 
-Import treatment is declared through `AccountingConvention`; the presence of an import vector alone is never used to infer an accounting equation.
+### Accounting consistency
 
-### Conservative convention defaults / 保守的な既定値
+When `Y`, `V`, and an explicit accounting convention are available, `ioaudit` can calculate input- and output-side accounting residuals, including:
 
-引数なしの `AccountingConvention()` は、会計上の意味を推測しない安全設定です。`transaction_scope`、`import_treatment`、`trade_representation`、`external_flow_scope`、`inflow_sign`、`outflow_sign` は `"unknown"` になり、影響を受ける会計診断は `SKIPPED` になります。
+- sector-level residuals
+- absolute residuals
+- relative residuals
+- MAE
+- RMSE
+- maximum residuals
+- rounding-aware status
 
-`AccountingConvention()` is intentionally conservative. Its semantic fields default to `"unknown"`, so affected accounting checks are `SKIPPED` instead of relying on an implicit table format.
+### Zero-output and zero-structure diagnostics
 
-会計構造を明示する場合は、構造名を持つopt-inプリセットを利用できます。
+- zero-output sectors
+- all-zero rows
+- all-zero columns
+- isolated sectors
+- inconsistencies between zero output and transaction structure
+
+### Technical coefficients and Leontief stability
+
+- technical coefficient matrix `A`
+- coefficient finiteness
+- spectral radius
+- invertibility of `I - A`
+- condition number
+- finiteness of the Leontief inverse
+
+### Possible subtotal double counting
+
+`report.components` checks whether columns in `Y` or rows in `V` appear to be totals or subtotals that may already include other supplied components.
+
+```python
+report.components.possible_subtotal_columns
+report.components.possible_subtotal_rows
+report.components.double_count_risk
+```
+
+Candidates are not removed automatically. If a possible subtotal makes the correct accounting subset ambiguous, the affected balance is reported as `SKIPPED`.
+
+### Powers-of-ten scale errors
+
+`report.scale` uses available accounting residuals to look for possible powers-of-ten scale mistakes in:
+
+- `x`
+- `Z`
+- `Y`
+- `V`
+- individual rows of `Z`
+- individual columns of `Z`
+- individual cells of `Z`
+
+```python
+for candidate in report.scale.possible_cell_scale_errors:
+    print(
+        candidate["row"],
+        candidate["column"],
+        candidate["candidate_factor"],
+    )
+```
+
+A scale candidate is diagnostic evidence, not a correction. `ioaudit` never applies the suggested factor to the source data.
+
+---
+
+## Accounting conventions
+
+Accounting identities are evaluated only under an explicitly declared interpretation of the table.
+
+The plain constructor is intentionally conservative:
+
+```python
+from ioaudit import AccountingConvention
+
+accounting = AccountingConvention()
+```
+
+Its semantic fields default to `"unknown"`. This means affected accounting checks are `SKIPPED` instead of assuming a particular national or statistical-office convention.
+
+For common accounting structures, explicit presets are available:
 
 ```python
 accounting = AccountingConvention.domestic_competitive(
@@ -92,19 +171,18 @@ accounting = AccountingConvention.domestic_competitive(
 )
 ```
 
-Use `AccountingConvention.domestic_competitive()` for a domestic table with competitive imports. Use `AccountingConvention.domestic_noncompetitive()` for a domestic table with noncompetitive imports, and `AccountingConvention.total_transactions()` for a total-transactions table. These presets describe accounting structures rather than countries. For example, a table with negative competitive-import entries can use the same `domestic_competitive()` preset regardless of its country of origin.
-
-数値計算のアルゴリズム上の既定値（`numerical_method="auto"`、scale候補 `10**(-6..6)` のうち1を除く、最小改善率 `0.5`、全体適用範囲 `0.75`、反対側悪化許容 `0.10`）は設定されています。一方、単位・丸め幅・交易の意味に関する既定値は設定されません。
-
-Algorithmic defaults are provided for numerical routing and candidate screening. Unit, rounding, and trade semantics are never inferred; `accounting_tolerance` remains `None` unless the caller declares it.
-
-## Accounting diagnostics / 会計診断
-
-最終需要 `Y`、付加価値 `V`、会計規約を指定すると、投入側・産出側の会計整合性を追加で監査できます。会計上の意味を明示するため、規約の値は省略せず指定してください。
+Other presets include:
 
 ```python
-from ioaudit import AccountingConvention
+AccountingConvention.domestic_noncompetitive()
+AccountingConvention.total_transactions()
+```
 
+These presets describe accounting structures, not countries.
+
+A fully explicit convention can also be supplied:
+
+```python
 accounting = AccountingConvention(
     transaction_scope="domestic",
     import_treatment="competitive",
@@ -113,7 +191,11 @@ accounting = AccountingConvention(
     inflow_sign="negative",
     outflow_sign="positive",
 )
+```
 
+Then use it when constructing the IO system:
+
+```python
 io = IOSystem(
     Z=Z,
     x=x,
@@ -122,77 +204,17 @@ io = IOSystem(
     V=np.array([[5.0, 8.0]]),
     accounting=accounting,
 )
+
 report = audit(io)
-print(report.accounting.input_balance.status)
-print(report.accounting.output_balance.status)
 ```
 
-Providing `Y`, `V`, and an explicit convention enables input- and output-side accounting checks. Omitted or semantically unknown convention fields skip only the affected checks.
+`ioaudit` does not infer import treatment or trade representation merely from the presence of an import vector.
 
-### Competitive import sign convention / 競争輸入の符号規約
+---
 
-v0.1 の `domestic/competitive` では、`inflow_sign="negative" | "positive" | "unknown"` を使用します。日本の産業連関表で一般的な負値の輸入行には `inflow_sign="negative"`、正の輸入額 `M` には `inflow_sign="positive"` を指定してください。
+## Rounding tolerance
 
-For `domestic/competitive` in v0.1, use `inflow_sign="negative" | "positive" | "unknown"`. Use `inflow_sign="negative"` for signed negative import rows commonly found in Japanese IO tables, and `inflow_sign="positive"` when imports are stored as positive magnitudes `M`.
-
-`negative` は `imports=-M` として `x = row_sum(Z) + f + imports`、`positive` は `imports=M` として `x = row_sum(Z) + f - imports` を適用します。`unknown` では符号を推測せず、調整済みの産出側会計監査を `SKIPPED` にします。旧APIの `import_sign` は `inflow_sign` の互換エイリアスです。
-
-`negative` applies `x = row_sum(Z) + f + imports` for `imports=-M`; `positive` applies `x = row_sum(Z) + f - imports` for `imports=M`. With `unknown`, no sign inference is performed and the adjusted output balance is `SKIPPED`. The legacy `import_sign` argument is accepted as a compatibility alias for `inflow_sign`.
-
-`import_treatment="none"` または `transaction_scope="total"` では import sign は会計計算に適用されず、レポートに `import_sign not applicable` が残ります。`trade_representation="unknown"` はこの指定より優先され、Yとの関係が不明なため産出側会計を `SKIPPED` にします。
-
-With `import_treatment="none"` or `transaction_scope="total"`, the import sign is not applied and the report records `import_sign not applicable`. `trade_representation="unknown"` takes precedence and skips output accounting because the relationship between `Y` and trade is unknown.
-
-## TradeFlows / 交易フロー
-
-地域表・全国表の交易は、`imports` / `exports` の個別引数ではなく `TradeFlows` にまとめて指定します。
-
-For national and regional tables, provide trade through `TradeFlows` instead of separate legacy `imports` / `exports` arguments.
-
-```python
-trade = TradeFlows(
-    interregional_inflows=imin,
-    international_imports=imports,
-    interregional_outflows=imout,
-    international_exports=exports,
-)
-```
-
-合算表では `combined_inflows` / `combined_outflows` を使用します。片側で合算表と分割表を同時に指定すると、二重計上防止のため該当する会計診断を `SKIPPED` にします。
-
-Use `combined_inflows` / `combined_outflows` for combined tables. Supplying combined and split representations on the same side causes the affected accounting diagnostic to be `SKIPPED` to prevent double counting.
-
-`external_flow_scope` は `international`、`interregional`、`both`、`unknown` のいずれかを宣言します。`transaction_scope` と `import_treatment` にも `unknown` を指定できます。`trade_representation` は `embedded`、`outflows_in_Y`、`separate`、`unknown` から選び、`unknown` ではYとの関係を推測しません。
-
-Declare `external_flow_scope` as `international`, `interregional`, `both`, or `unknown`. `transaction_scope` and `import_treatment` also accept `unknown`. Choose `trade_representation` from `embedded`, `outflows_in_Y`, `separate`, and `unknown`; `unknown` never triggers an inference about what is included in `Y`.
-
-交易ベクトルは供給・需要側のフローとして扱い、購入部門別の輸移入投入を列側の投入会計へ流用しません。購入部門別の外部投入データがない場合、trade-adjusted input balance は `SKIPPED` です。
-
-Trade vectors are treated as supply/demand-side flows and are not reused as user-specific intermediate inputs. Without user-specific external-input data, the trade-adjusted input balance is `SKIPPED`.
-
-## Component and structure diagnostics / 構成要素・構造診断
-
-`report.components` は、`Y` の合計列や `V` の付加価値計行が他の構成要素の合計に近い場合に、二重計上候補として報告します。候補を自動的に除外せず、会計監査の `sum(axis=...)` も変更しません。
-
-`report.components` reports possible double counting when a total column in `Y` or a value-added total row in `V` is close to the sum of its components. Candidates are reported, not removed, and the accounting sums are not changed automatically.
-
-subtotal候補が検出された場合は、曖昧な列・行を選ばないため、Y側のoutput balanceまたはV側のinput balanceを `SKIPPED` にします。2成分しかないY/Vでは、ラベルのない数値一致だけではsubtotalと判定しません。
-
-When a subtotal candidate is detected, the corresponding output or input balance is `SKIPPED` because the correct subset is ambiguous. For a two-component `Y` or `V`, an unlabeled numeric match alone is not treated as a subtotal.
-
-`report.structure` には、`possible_nonsector_rows` / `possible_nonsector_columns`、完全一致する `possible_duplicate_rows` / `possible_duplicate_columns`、Unicode幅・空白を正規化したラベル一致、`duplicate_labels_after_normalization` が含まれます。`合計`、`輸入`、`最終需要`、`付加価値` などのラベルはZへの混入候補として警告されます。
-
-`report.structure` includes possible non-sector rows and columns, exact duplicate rows and columns, normalized label matches, and `duplicate_labels_after_normalization`. Labels such as `合計`, `輸入`, `最終需要`, and `付加価値` are reported as possible non-sector content in `Z`.
-
-`report.zero_output` は、`all_zero_rows`、`all_zero_columns`、`isolated_sectors` を返します。これらは切り出しや欠損の確認材料であり、自動削除やゼロ置換は行いません。
-
-`report.zero_output` returns `all_zero_rows`, `all_zero_columns`, and `isolated_sectors`. These are evidence for checking extraction and missing values; no rows are deleted and no values are replaced with zero.
-
-## Accounting tolerance / 会計許容差
-
-丸め誤差を考慮する場合は、許容値を明示して監査します。指定値はレポートと provenance に保存され、入力値は変更されません。
-
-Declare tolerances when published tables are rounded. The selected values are stored in the report and provenance, and the input values remain unchanged.
+Published input-output tables may contain residuals caused by rounding. Tolerances can be declared explicitly:
 
 ```python
 report = audit(
@@ -205,88 +227,257 @@ report = audit(
 )
 ```
 
-会計診断は、完全一致なら `PASS`、許容範囲内の丸め差なら `ROUNDING_LEVEL`、許容範囲外なら `FAIL` を返します。`raise_for_status()` は既定では会計相対残差ゲートを追加しません。相対残差をCI条件にする場合は `report.raise_for_status(max_relative_residual=1e-4)` のように明示してください。`max_spectral_radius` の既定値は `1.0` です。
+A non-zero residual within the declared tolerance is reported as `ROUNDING_LEVEL`.
 
-Accounting diagnostics return `PASS` for exact agreement, `ROUNDING_LEVEL` for residuals within the declared tolerance, and `FAIL` otherwise. `raise_for_status()` does not add an accounting relative-residual gate by default. Add one explicitly for CI, for example `report.raise_for_status(max_relative_residual=1e-4)`. The default `max_spectral_radius` is `1.0`.
+The selected tolerance is stored in the report provenance. Input values are never changed.
 
-## Metadata and provenance / メタデータ・来歴
+---
 
-表の意味を再現できるよう、`metadata` の `year`、`unit`、`price_basis` を必須推奨項目として監査します。`currency` と `valuation` も推奨項目です。値を推測せず、欠落は `report.metadata` に残します。
+## Trade flows
 
-To make the table auditable and reproducible, `year`, `unit`, and `price_basis` are recommended metadata fields. `currency` and `valuation` are also recommended. Missing metadata is reported rather than inferred.
+External and interregional flows can be represented with `TradeFlows`.
 
-各監査には、入力内容のSHA-256 `input_hash`、ioauditバージョン、指定・選択した数値計算方式、会計tolerance、scale候補条件、実行時刻、適用した閾値を含む `report.provenance` が付きます。
+```python
+from ioaudit import TradeFlows
 
-Each audit includes `report.provenance` with an SHA-256 `input_hash`, the ioaudit version, requested and selected numerical methods, accounting tolerance, scale-candidate settings, execution time, and applied thresholds.
+trade = TradeFlows(
+    interregional_inflows=interregional_inflows,
+    international_imports=imports,
+    interregional_outflows=interregional_outflows,
+    international_exports=exports,
+)
+```
 
-## File diagnostics / ファイル入力診断
+If only combined flows are available:
 
-IOSystem に渡す前の区切りテキストは、`inspect_csv()` で読み取り上の異常を確認できます。
+```python
+trade = TradeFlows(
+    combined_inflows=inflows,
+    combined_outflows=outflows,
+)
+```
 
-Delimited text can be inspected before constructing an `IOSystem` with `inspect_csv()`.
+`AccountingConvention` declares whether trade is embedded in final demand, included as outflows in `Y`, reported separately, or unknown.
+
+`ioaudit` never infers this relationship. Conflicting combined and split representations are reported rather than added together.
+
+Trade vectors are treated as supply/demand-side flows. They are not reused as user-specific intermediate inputs unless such information is explicitly available.
+
+---
+
+## Reference validation
+
+Externally calculated technical-coefficient or Leontief-inverse matrices can be supplied as references:
+
+```python
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    A_reference=A_ref,
+    L_reference=L_ref,
+)
+```
+
+`ioaudit` compares the internally calculated matrices with the supplied references and reports structural and numerical differences.
+
+---
+
+## Metadata and provenance
+
+Metadata can be attached to the input table so that its interpretation remains reproducible:
+
+```python
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    metadata={
+        "year": 2020,
+        "unit": "million_yen",
+        "currency": "JPY",
+        "price_basis": "producer",
+        "valuation": "current",
+    },
+)
+```
+
+The metadata diagnostic checks fields such as:
+
+- `year`
+- `unit`
+- `price_basis`
+- `currency`
+- `valuation`
+
+Each audit also includes `report.provenance`, which records information such as:
+
+- ioaudit version
+- SHA-256 input hash
+- requested numerical method
+- selected numerical method
+- accounting tolerance
+- scale-diagnostic settings
+- applied thresholds
+- audit timestamp
+
+---
+
+## File diagnostics
+
+Delimited text files can be inspected before constructing an `IOSystem`.
 
 ```python
 from ioaudit import inspect_csv
 
-raw_report = inspect_csv("io.csv", delimiter=",", encoding="cp932")
+raw_report = inspect_csv(
+    "io.csv",
+    delimiter=",",
+    encoding="cp932",
+)
+
 print(raw_report.summary())
 ```
 
-この前段は encoding/BOM、delimiter、空行、列数不一致、重複・空ヘッダー、trailing delimiter、引用符異常、空白、数値として読めないトークン、NaN/Inf風トークン、桁区切りの未引用らしきパターン、注記行や途中見出しの再出現を報告します。
+The file-level diagnostics can report issues such as:
 
-The file-level diagnostic reports encoding/BOM, delimiter, blank rows, inconsistent column counts, duplicate or empty headers, trailing delimiters, quoting anomalies, whitespace, non-numeric tokens, NaN/Inf-like tokens, possible unquoted thousands separators, note rows, and repeated headers.
+- encoding and BOM
+- delimiter problems
+- empty rows
+- inconsistent column counts
+- empty or duplicate headers
+- trailing delimiters
+- malformed quoting
+- suspicious whitespace
+- non-numeric tokens
+- NaN/Inf-like tokens
+- likely unquoted thousands separators
+- note rows
+- repeated headers within the file
 
-桁区切りの変換、行列範囲の推測、脚注や合計行の削除、Z・x・Y・Vの自動抽出は行いません。
-
-It does not convert thousands separators, infer matrix ranges, delete notes or totals, or automatically extract `Z`, `x`, `Y`, and `V`.
+`ioaudit` does not automatically infer which regions of a file correspond to `Z`, `x`, `Y`, or `V`, and it does not remove footnotes or total rows automatically.
 
 ```text
-file diagnostics -> parsing by the caller -> IOSystem -> audit()
+file diagnostics
+    ↓
+parsing by the caller
+    ↓
+IOSystem
+    ↓
+audit()
 ```
 
-## Numerical routes / 数値計算方式
+---
 
-`audit(io, numerical_method="auto")` は小規模行列では dense route、大規模行列では iterative route を選択します。`dense` は NumPy の通常計算、`iterative` は SciPy の疎行列固有値計算・疎LU・条件数推定を使用します。選択結果と推定の有無は `report.methods` に保存されます。
+## Using the report
 
-`audit(io, numerical_method="auto")` selects a dense route for small matrices and an iterative route for large matrices. `dense` uses standard NumPy calculations; `iterative` uses SciPy sparse eigenvalue, sparse-LU, and condition-estimation routines. The selected route and whether values are estimated are stored in `report.methods`.
-
-## Scale diagnostics / 桁・単位診断
-
-`report.scale` は、宣言された会計残差を使って桁倍率の候補を診断します。`10**k`（`k=-6..6`、1を除く）を現在値に掛ける係数として仮想的に適用し、`x`・`Z`・`Y`・`V`の全体倍率、`Z`の行・列倍率、さらに行側と列側の両方を改善するセル倍率を候補として記録します。`A_reference` がある場合はセル候補に参照係数との差の改善も記録します。
-
-`accounting_tolerance` を指定した場合、scale候補の改善度は `max(absolute, relative * abs(x), rounding_unit)` を超える残差だけを使って評価します。元の残差は会計診断にそのまま保持されます。toleranceを指定しない場合は丸め情報がないため、誤検出を避ける目的でセル単位のscale診断を `SKIPPED` とし、`report.scale.cell_reason` に `rounding context unavailable` を記録します。
-
-`report.scale` diagnoses candidate scale factors using declared accounting residuals. It virtually applies `10**k` for `k=-6..6` except `1` to global `x`, `Z`, `Y`, and `V`, to `Z` rows and columns, and to individual cells that improve both sides. When `A_reference` is available, reference-coefficient improvement is also recorded.
-
-When `accounting_tolerance` is supplied, scale evidence uses only residuals beyond `max(absolute, relative * abs(x), rounding_unit)`, while raw accounting residuals remain unchanged. Without a declared rounding context, cell-level scale diagnostics are `SKIPPED` and `report.scale.cell_reason` records `rounding context unavailable`.
-
-候補は修正値ではなく残差改善の証拠です。行・列候補は反対側の会計残差も評価し、反対側を10%超悪化させる候補は報告しません。反対側を監査できない候補は `opposite_balance_available=False`、`evidence_level="one_sided"` として保存されます。
-
-Candidates are evidence of residual improvement, not repairs. Row and column candidates are checked against the opposite accounting side; candidates that degrade it by more than 10% are omitted. If the opposite side is unavailable, the candidate is marked with `opposite_balance_available=False` and `evidence_level="one_sided"`.
+Reports can be inspected interactively or exported for downstream processing:
 
 ```python
-for candidate in report.scale.possible_cell_scale_errors:
-    print(candidate["row"], candidate["column"], candidate["candidate_factor"])
+report.summary()
+report.to_dict()
+report.to_json()
+report.to_dataframe()
 ```
 
-会計残差が利用できない場合は `report.scale.status == "SKIPPED"` になります。桁ミスの自動修正や候補の自動採用は行いません。
+For automated checks or CI:
 
-When accounting residuals are unavailable, `report.scale.status == "SKIPPED"`. Scale errors are never repaired or automatically accepted.
+```python
+report.raise_for_status()
+```
 
-## What ioaudit does not do / 対象外
+An explicit accounting-residual threshold can also be applied:
 
-v0.1 は単一 IO 表の監査に限定しています。RAS、GRAS、KRAS、行列バランシング、表修正、地域化、貿易推計、データダウンロード、Excel 自動解析、セクター自動マッチング、品質スコア、真偽判定、表比較、階層・集計診断、政策ランキング、調査優先順位付け、可視化、GUI は実装しません。
+```python
+report.raise_for_status(
+    max_relative_residual=1e-4,
+)
+```
 
-v0.1 is limited to auditing a single IO table. It does not implement RAS, GRAS, KRAS, matrix balancing, table correction, regionalization, trade estimation, data downloading, automatic Excel parsing, automatic sector matching, quality scores, truth judgments, table comparison, hierarchical or aggregation diagnostics, policy ranking, survey prioritization, visualization, or a GUI.
+---
 
-## Tests / テスト
+## Numerical routes
+
+```python
+report = audit(io, numerical_method="auto")
+```
+
+With `"auto"`, `ioaudit` selects a dense or iterative numerical route according to the input size and whether the matrix is sparse. The selected route and approximation metadata are recorded in `report.methods` and provenance.
+
+---
+
+## Design principle
+
+### Diagnose, do not repair
+
+`ioaudit` does **not** automatically:
+
+- balance inconsistent tables
+- remove totals or subtotal rows
+- transpose matrices
+- change signs
+- rescale suspicious values
+- infer unknown accounting conventions
+
+Audit results are evidence for pre-analysis review, not instructions to mutate the table.
+
+---
+
+## Scope
+
+Version 0.1 focuses on **preflight diagnostics for a single input-output system**.
+
+It does not provide:
+
+- RAS / GRAS / KRAS
+- matrix balancing
+- automatic table repair
+- regionalization
+- trade estimation
+- data downloading
+- automatic Excel interpretation
+- automatic sector matching
+- table comparison
+- hierarchy or aggregation diagnostics
+- impact analysis
+- multiplier analysis
+- structural decomposition analysis
+- policy ranking
+- visualization
+- GUI tools
+
+`ioaudit` is not an input-output analysis package.
+
+**It answers a narrower question: is this table safe to pass to analytical code?**
+
+---
+
+## Installation
+
+For the current development version, clone the repository and install it locally:
+
+```bash
+pip install -e .
+```
+
+Python 3.10 or later is required.
+
+To include test dependencies:
+
+```bash
+pip install -e ".[test]"
+```
+
+---
+
+## Tests
 
 ```bash
 pytest
 ```
 
-ローカルテストは小さなsynthetic IO表を使用し、外部データをダウンロードしません。GitHub Actionsでは、pushとpull requestごとにPython 3.10〜3.13で同じpytestを実行します。e-Statの実データ検証は、アプリケーションIDを明示的に設定した環境で個別に実行してください。
+---
 
-The test suite uses small synthetic IO tables and does not download external data. Live e-Stat checks should be run separately with an explicitly configured application ID.
+## License
 
-GitHub Actions runs the same pytest suite on Python 3.10 through 3.13 for every push and pull request.
+MIT License.
