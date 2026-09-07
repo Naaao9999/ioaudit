@@ -48,6 +48,10 @@ class ScaleDiagnostics:
     minimum_improvement: float = _MIN_IMPROVEMENT
     minimum_global_coverage: float = _MIN_GLOBAL_COVERAGE
     maximum_opposite_side_degradation: float = _MAX_OPPOSITE_SIDE_DEGRADATION
+    tolerance: dict[str, float] | None = None
+    rounding_context_available: bool = False
+    cell_status: str = "SKIPPED"
+    cell_reason: str | None = "scale diagnostics unavailable"
     reason: str | None = None
 
     @property
@@ -84,6 +88,35 @@ def _metric(residuals: list[np.ndarray | None], x: np.ndarray) -> float | None:
         return None
     denominator = max(float(np.linalg.norm(x)), 1.0)
     return float(np.linalg.norm(combined) / denominator)
+
+
+def _evidence_residual(
+    residual: np.ndarray | None,
+    x: np.ndarray,
+    tolerance: dict[str, float] | None,
+) -> np.ndarray | None:
+    """Return residual remaining outside a declared accounting envelope.
+
+    The raw accounting residual is retained by the accounting diagnostics.
+    Scale diagnostics use only the excess beyond ``max(absolute,
+    relative * abs(x), rounding_unit)`` when a tolerance is declared.  This
+    prevents a rounding-sized difference from becoming scale-error evidence.
+    """
+
+    if residual is None:
+        return None
+    values = np.asarray(residual, dtype=float)
+    if tolerance is None:
+        return values.copy()
+    allowed = np.maximum.reduce(
+        (
+            np.full_like(values, float(tolerance.get("absolute", 0.0))),
+            float(tolerance.get("relative", 0.0)) * np.abs(x),
+            np.full_like(values, float(tolerance.get("rounding_unit", 0.0))),
+        )
+    )
+    excess = np.maximum(np.abs(values) - allowed, 0.0)
+    return np.copysign(excess, values)
 
 
 def _improvement(before: float, after: float) -> float | None:
@@ -186,6 +219,7 @@ def _global_candidates(
     output_residual: np.ndarray | None,
     sectors: list[Any],
     factors: tuple[float, ...],
+    tolerance: dict[str, float] | None,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     field_availability = {
@@ -213,7 +247,12 @@ def _global_candidates(
         else:
             selected_before = [input_residual]
             balances = ["input"]
-        before = _metric(selected_before, x)
+        selected_before_evidence = [
+            _evidence_residual(residual, x, tolerance)
+            for residual in selected_before
+        ]
+        before_raw = _metric(selected_before, x)
+        before = _metric(selected_before_evidence, x)
         if before is None or before == 0.0:
             continue
         for factor in factors:
@@ -234,16 +273,27 @@ def _global_candidates(
                 candidate_output -= delta * f
             elif field_name == "V" and candidate_input is not None and v is not None:
                 candidate_input -= delta * v
+            selected_after_raw = [candidate_input, candidate_output]
             if field_name in {"x", "Z"}:
-                selected_after = [candidate_input, candidate_output]
+                selected_after = [
+                    _evidence_residual(residual, x, tolerance)
+                    for residual in selected_after_raw
+                ]
             elif field_name == "Y":
-                selected_after = [candidate_output]
+                selected_after_raw = [candidate_output]
+                selected_after = [
+                    _evidence_residual(candidate_output, x, tolerance)
+                ]
             else:
-                selected_after = [candidate_input]
+                selected_after_raw = [candidate_input]
+                selected_after = [
+                    _evidence_residual(candidate_input, x, tolerance)
+                ]
             after = _metric(selected_after, x)
+            after_raw = _metric(selected_after_raw, x)
             if after is None:
                 continue
-            coverage = _coverage(selected_before, selected_after)
+            coverage = _coverage(selected_before_evidence, selected_after)
             if coverage is None or coverage < _MIN_GLOBAL_COVERAGE:
                 continue
             improvement = _improvement(before, after)
@@ -253,8 +303,10 @@ def _global_candidates(
                 {
                     "field": field_name,
                     "candidate_factor": factor,
-                    "residual_before": before,
-                    "residual_after": after,
+                    "residual_before": before_raw,
+                    "residual_after": after_raw,
+                    "evidence_residual_before": before,
+                    "evidence_residual_after": after,
                     "improvement": improvement,
                     "coverage": coverage,
                     "affected_balances": balances,
@@ -274,18 +326,33 @@ def _row_candidates(
     output_residual: np.ndarray | None,
     sectors: list[Any],
     factors: tuple[float, ...],
+    tolerance: dict[str, float] | None,
 ) -> list[dict[str, Any]]:
     if output_residual is None:
         return []
     candidates: list[dict[str, Any]] = []
-    input_before = _metric([input_residual], x)
+    input_before = _metric(
+        [_evidence_residual(input_residual, x, tolerance)], x
+    )
+    output_evidence = _evidence_residual(output_residual, x, tolerance)
+    if output_evidence is None:
+        return []
     for index, total in enumerate(row_sum):
-        before = abs(float(output_residual[index]))
+        raw_before = abs(float(output_residual[index]))
+        before = abs(float(output_evidence[index]))
         if not np.isfinite(before) or before == 0.0 or not np.isfinite(total):
             continue
         row_values = _dimension_vector(z, 0, index)
         for factor in factors:
-            after = abs(float(output_residual[index] - (factor - 1.0) * total))
+            raw_after = abs(float(output_residual[index] - (factor - 1.0) * total))
+            candidate_output = output_residual.copy()
+            candidate_output[index] -= (factor - 1.0) * total
+            candidate_output_evidence = _evidence_residual(
+                candidate_output, x, tolerance
+            )
+            if candidate_output_evidence is None:
+                continue
+            after = abs(float(candidate_output_evidence[index]))
             improvement = _improvement(before, after)
             if improvement is None or improvement < _MIN_IMPROVEMENT:
                 continue
@@ -294,7 +361,9 @@ def _row_candidates(
                 if input_residual is not None
                 else None
             )
-            input_after = _metric([candidate_input], x)
+            input_after = _metric(
+                [_evidence_residual(candidate_input, x, tolerance)], x
+            )
             side_ok, side_improvement, side_degradation, side_available = _side_constraint(
                 input_before, input_after
             )
@@ -305,8 +374,10 @@ def _row_candidates(
                     "index": index,
                     "sector": _label(sectors, index),
                     "candidate_factor": factor,
-                    "residual_before": before,
-                    "residual_after": after,
+                    "residual_before": raw_before,
+                    "residual_after": raw_after,
+                    "evidence_residual_before": before,
+                    "evidence_residual_after": after,
                     "improvement": improvement,
                     "opposite_balance": "input",
                     "opposite_balance_before": input_before,
@@ -332,18 +403,33 @@ def _column_candidates(
     input_residual: np.ndarray | None,
     sectors: list[Any],
     factors: tuple[float, ...],
+    tolerance: dict[str, float] | None,
 ) -> list[dict[str, Any]]:
     if input_residual is None:
         return []
     candidates: list[dict[str, Any]] = []
-    output_before = _metric([output_residual], x)
+    output_before = _metric(
+        [_evidence_residual(output_residual, x, tolerance)], x
+    )
+    input_evidence = _evidence_residual(input_residual, x, tolerance)
+    if input_evidence is None:
+        return []
     for index, total in enumerate(column_sum):
-        before = abs(float(input_residual[index]))
+        raw_before = abs(float(input_residual[index]))
+        before = abs(float(input_evidence[index]))
         if not np.isfinite(before) or before == 0.0 or not np.isfinite(total):
             continue
         column_values = _dimension_vector(z, 1, index)
         for factor in factors:
-            after = abs(float(input_residual[index] - (factor - 1.0) * total))
+            raw_after = abs(float(input_residual[index] - (factor - 1.0) * total))
+            candidate_input = input_residual.copy()
+            candidate_input[index] -= (factor - 1.0) * total
+            candidate_input_evidence = _evidence_residual(
+                candidate_input, x, tolerance
+            )
+            if candidate_input_evidence is None:
+                continue
+            after = abs(float(candidate_input_evidence[index]))
             improvement = _improvement(before, after)
             if improvement is None or improvement < _MIN_IMPROVEMENT:
                 continue
@@ -352,7 +438,9 @@ def _column_candidates(
                 if output_residual is not None
                 else None
             )
-            output_after = _metric([candidate_output], x)
+            output_after = _metric(
+                [_evidence_residual(candidate_output, x, tolerance)], x
+            )
             side_ok, side_improvement, side_degradation, side_available = _side_constraint(
                 output_before, output_after
             )
@@ -363,8 +451,10 @@ def _column_candidates(
                     "index": index,
                     "sector": _label(sectors, index),
                     "candidate_factor": factor,
-                    "residual_before": before,
-                    "residual_after": after,
+                    "residual_before": raw_before,
+                    "residual_after": raw_after,
+                    "evidence_residual_before": before,
+                    "evidence_residual_after": after,
                     "improvement": improvement,
                     "opposite_balance": "output",
                     "opposite_balance_before": output_before,
@@ -390,13 +480,20 @@ def _cell_candidates(
     sectors: list[Any],
     factors: tuple[float, ...],
     a_reference: np.ndarray | None,
+    tolerance: dict[str, float] | None,
 ) -> list[dict[str, Any]]:
     if input_residual is None or output_residual is None:
         return []
     candidates: list[dict[str, Any]] = []
+    input_evidence = _evidence_residual(input_residual, x, tolerance)
+    output_evidence = _evidence_residual(output_residual, x, tolerance)
+    if input_evidence is None or output_evidence is None:
+        return []
     for row, column, value in _cell_values(z):
-        before_output = abs(float(output_residual[row]))
-        before_input = abs(float(input_residual[column]))
+        raw_before_output = abs(float(output_residual[row]))
+        raw_before_input = abs(float(input_residual[column]))
+        before_output = abs(float(output_evidence[row]))
+        before_input = abs(float(input_evidence[column]))
         if (
             not np.isfinite(before_output)
             or not np.isfinite(before_input)
@@ -406,8 +503,22 @@ def _cell_candidates(
         ):
             continue
         for factor in factors:
-            after_output = abs(float(output_residual[row] - (factor - 1.0) * value))
-            after_input = abs(float(input_residual[column] - (factor - 1.0) * value))
+            candidate_output = output_residual.copy()
+            candidate_input = input_residual.copy()
+            candidate_output[row] -= (factor - 1.0) * value
+            candidate_input[column] -= (factor - 1.0) * value
+            candidate_output_evidence = _evidence_residual(
+                candidate_output, x, tolerance
+            )
+            candidate_input_evidence = _evidence_residual(
+                candidate_input, x, tolerance
+            )
+            if candidate_output_evidence is None or candidate_input_evidence is None:
+                continue
+            after_output = abs(float(candidate_output_evidence[row]))
+            after_input = abs(float(candidate_input_evidence[column]))
+            raw_after_output = abs(float(candidate_output[row]))
+            raw_after_input = abs(float(candidate_input[column]))
             output_improvement = _improvement(before_output, after_output)
             input_improvement = _improvement(before_input, after_input)
             if (
@@ -425,10 +536,14 @@ def _cell_candidates(
                 "value": value,
                 "candidate_factor": factor,
                 "candidate_value": value * factor,
-                "output_residual_before": before_output,
-                "output_residual_after": after_output,
-                "input_residual_before": before_input,
-                "input_residual_after": after_input,
+                "output_residual_before": raw_before_output,
+                "output_residual_after": raw_after_output,
+                "input_residual_before": raw_before_input,
+                "input_residual_after": raw_after_input,
+                "output_evidence_residual_before": before_output,
+                "output_evidence_residual_after": after_output,
+                "input_evidence_residual_before": before_input,
+                "input_evidence_residual_after": after_input,
                 "output_residual_improvement": output_improvement,
                 "input_residual_improvement": input_improvement,
                 "evidence_level": _evidence_level(
@@ -520,6 +635,15 @@ def diagnose_scale(
         return result
 
     x_array = np.asarray(x, dtype=float).reshape(-1)
+    tolerance = getattr(accounting, "tolerance", None)
+    result.tolerance = dict(tolerance) if tolerance is not None else None
+    result.rounding_context_available = tolerance is not None
+    if tolerance is not None:
+        result.cell_status = "AVAILABLE"
+        result.cell_reason = None
+    else:
+        result.cell_status = "SKIPPED"
+        result.cell_reason = "rounding context unavailable"
     try:
         row_sum = _axis_sum(z, 1)
         column_sum = _axis_sum(z, 0)
@@ -539,6 +663,7 @@ def diagnose_scale(
         output_residual=output_residual,
         sectors=sectors,
         factors=factors,
+        tolerance=tolerance,
     )
     result.possible_row_scale_errors = _row_candidates(
         z=z,
@@ -548,6 +673,7 @@ def diagnose_scale(
         output_residual=output_residual,
         sectors=sectors,
         factors=factors,
+        tolerance=tolerance,
     )
     result.possible_column_scale_errors = _column_candidates(
         z=z,
@@ -557,20 +683,25 @@ def diagnose_scale(
         input_residual=input_residual,
         sectors=sectors,
         factors=factors,
+        tolerance=tolerance,
     )
     a_reference = _reference_array(io, z_shape)
-    result.possible_cell_scale_errors = _cell_candidates(
-        z=z,
-        x=x_array,
-        input_residual=input_residual,
-        output_residual=output_residual,
-        sectors=sectors,
-        factors=factors,
-        a_reference=a_reference,
-    )
+    if tolerance is not None:
+        result.possible_cell_scale_errors = _cell_candidates(
+            z=z,
+            x=x_array,
+            input_residual=input_residual,
+            output_residual=output_residual,
+            sectors=sectors,
+            factors=factors,
+            a_reference=a_reference,
+            tolerance=tolerance,
+        )
     result.robust_outliers = _robust_outliers(
-        output_residual, "output", sectors
-    ) + _robust_outliers(input_residual, "input", sectors)
+        _evidence_residual(output_residual, x_array, tolerance), "output", sectors
+    ) + _robust_outliers(
+        _evidence_residual(input_residual, x_array, tolerance), "input", sectors
+    )
     result.status = "AVAILABLE"
     return result
 

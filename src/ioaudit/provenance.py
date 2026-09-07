@@ -133,6 +133,12 @@ def build_provenance(
             "maximum_opposite_side_degradation": getattr(
                 scale, "maximum_opposite_side_degradation", None
             ),
+            "tolerance": _canonical(getattr(scale, "tolerance", None)),
+            "rounding_context_available": getattr(
+                scale, "rounding_context_available", False
+            ),
+            "cell_status": getattr(scale, "cell_status", None),
+            "cell_reason": getattr(scale, "cell_reason", None),
         }
     selected_method = getattr(methods, "numerical_method", None)
     return {

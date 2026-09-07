@@ -19,7 +19,7 @@ def test_transposed_table_detectable():
     z = np.array([[2.0, 1.0], [4.0, 3.0]])
     x = np.array([10.0, 10.0])
     y = np.array([4.0, 6.0])
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, imports=np.zeros(2), accounting=AccountingConvention()))
+    report = audit(IOSystem(z, x, ["a", "b"], Y=y, imports=np.zeros(2), accounting=AccountingConvention.japan_competitive()))
     assert report.orientation.possible_transpose is True
 
 
@@ -27,7 +27,7 @@ def test_transposed_table_indeterminate():
     z = np.array([[2.0, 1.0], [1.0, 3.0]])
     x = np.array([8.0, 9.0])
     # Symmetric evidence makes both orientations equally plausible.
-    report = audit(IOSystem(z, x, ["a", "b"], Y=np.array([5.0, 5.0]), V=np.array([5.0, 5.0]), accounting=AccountingConvention()))
+    report = audit(IOSystem(z, x, ["a", "b"], Y=np.array([5.0, 5.0]), V=np.array([5.0, 5.0]), accounting=AccountingConvention.japan_competitive()))
     assert report.orientation.possible_transpose is None
 
 

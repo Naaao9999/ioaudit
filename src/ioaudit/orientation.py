@@ -61,14 +61,16 @@ def _score(
         inflow_sign = "positive" if legacy_noncompetitive else convention.inflow_sign
         if trade_conflict:
             residual = None
-        elif representation == "unknown":
+        elif (
+            representation == "unknown"
+            or convention.transaction_scope == "unknown"
+            or convention.import_treatment == "unknown"
+        ):
             residual = None
         elif convention.transaction_scope == "total" or convention.import_treatment == "none":
             residual = x - base
         elif representation == "embedded":
             residual = x - base
-        elif representation == "unknown":
-            residual = None
         else:
             inflows, _, _ = _trade_side(
                 trade,
