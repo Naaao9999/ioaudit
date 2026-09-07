@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import sparse
 
 from .conventions import AccountingConvention
 from .exceptions import IOValidationError
@@ -31,15 +32,15 @@ def _copy_value(value: Any, name: str, *, allow_none: bool = True) -> Any:
         return value.copy(deep=True)
     if isinstance(value, pd.Series):
         return value.copy(deep=True)
-    try:
-        # scipy sparse matrices expose copy() and are useful for the iterative
-        # route.  Import scipy lazily so the model remains easy to inspect.
-        from scipy import sparse
-
-        if sparse.issparse(value):
-            return value.copy()
-    except Exception:
-        pass
+    if sparse.issparse(value):
+        # Normalize storage on an independent copy, never on the caller's data.
+        # Downstream diagnostics use the two-dimensional sparse matrix API.
+        if value.ndim != 2:
+            raise IOValidationError(f"{name} sparse input must be two-dimensional")
+        try:
+            return sparse.csr_matrix(value, copy=True)
+        except (TypeError, ValueError) as exc:
+            raise IOValidationError(f"{name} sparse input could not be copied") from exc
     if isinstance(value, np.ndarray):
         return value.copy()
     if isinstance(value, (list, tuple)):

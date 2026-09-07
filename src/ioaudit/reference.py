@@ -82,15 +82,38 @@ def _compare(calculated: np.ndarray | None, reference: Any, target: Any, sectors
         result.status = "FAIL"
         result.reason = "reference or calculated matrix contains NaN/Inf"
         return result
-    difference = calculated_array - ref_array
+    with np.errstate(over="ignore", invalid="ignore"):
+        difference = calculated_array - ref_array
+    if not np.isfinite(difference).all():
+        result.status = "FAIL"
+        result.reason = "reference difference exceeds floating-point range"
+        return result
     absolute = np.abs(difference)
-    denominator = float(np.linalg.norm(ref_array))
-    result.max_absolute_difference = float(np.max(absolute)) if absolute.size else 0.0
-    result.mean_absolute_difference = float(np.mean(absolute)) if absolute.size else 0.0
-    result.rmse = float(np.sqrt(np.mean(difference**2))) if difference.size else 0.0
-    result.relative_difference = float(np.linalg.norm(difference) / denominator) if denominator else (
-        0.0 if not np.any(difference) else float("inf")
-    )
+    scale = float(np.max(absolute)) if absolute.size else 0.0
+    scaled = absolute / scale if scale else np.zeros_like(absolute)
+    result.max_absolute_difference = scale
+    result.mean_absolute_difference = scale * float(np.mean(scaled)) if scaled.size else 0.0
+    result.rmse = scale * float(np.sqrt(np.mean(scaled**2))) if scaled.size else 0.0
+    ref_scale = float(np.max(np.abs(ref_array))) if ref_array.size else 0.0
+    if ref_scale and scale:
+        # Normalize both norms before squaring. Their unscaled norms can
+        # overflow even when the ratio and every reported metric are finite.
+        numerator_mantissa, numerator_exponent = np.frexp(scale)
+        denominator_mantissa, denominator_exponent = np.frexp(ref_scale)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            result.relative_difference = float(
+                np.ldexp(
+                    (np.linalg.norm(scaled) / np.linalg.norm(ref_array / ref_scale))
+                    * numerator_mantissa / denominator_mantissa,
+                    numerator_exponent - denominator_exponent,
+                )
+            )
+        if not np.isfinite(result.relative_difference):
+            result.status = "FAIL"
+            result.reason = "relative reference difference exceeds floating-point range"
+            return result
+    else:
+        result.relative_difference = 0.0 if not scale else float("inf")
     exact = bool(
         np.all(
             absolute
