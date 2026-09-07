@@ -125,6 +125,8 @@ class IOSystem:
         metadata: dict[str, Any] | None = None,
         accounting: AccountingConvention | None = None,
         trade: TradeFlows | None = None,
+        external_inputs_by_user: Any = None,
+        input_adjustments_by_user: Any = None,
     ) -> None:
         # ``trade`` is the canonical keyword.  Accepting it in the historical
         # sixth positional slot keeps migration from imports= convenient.
@@ -155,6 +157,12 @@ class IOSystem:
         self.satellites = _copy_value(satellites, "satellites")
         self.A_reference = _copy_value(A_reference, "A_reference")
         self.L_reference = _copy_value(L_reference, "L_reference")
+        self.external_inputs_by_user = _copy_value(
+            external_inputs_by_user, "external_inputs_by_user"
+        )
+        self.input_adjustments_by_user = _copy_value(
+            input_adjustments_by_user, "input_adjustments_by_user"
+        )
         self.trade = (
             TradeFlows(
                 international_imports=imports,

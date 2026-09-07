@@ -165,9 +165,9 @@ def test_unknown_trade_representation_skips_even_with_total_scope():
 
 
 def test_noncompetitive_without_import_vectors_skips_adjusted_side():
-    report = audit(IOSystem(np.eye(2), np.ones(2), ["a", "b"], Y=np.ones(2), V=np.ones(2), accounting=AccountingConvention("domestic", "noncompetitive")))
+    report = audit(IOSystem(np.eye(2), np.ones(2), ["a", "b"], Y=np.ones(2), V=np.ones(2), accounting=AccountingConvention("domestic", "noncompetitive", input_representation="complete")))
     assert report.accounting.output_balance.status == "SKIPPED"
-    assert report.accounting.input_balance.status == "PASS"
+    assert report.accounting.input_balance.status == "AVAILABLE"
 
 
 def test_missing_convention_skips_accounting(normal_io):
@@ -187,7 +187,7 @@ def test_plain_convention_skips_semantically_ambiguous_output_check():
             accounting=AccountingConvention(),
         )
     )
-    assert report.accounting.input_balance.status == "PASS"
+    assert report.accounting.input_balance.status == "SKIPPED"
     assert report.accounting.output_balance.status == "SKIPPED"
     assert "unknown" in report.accounting.output_balance.reason
 
@@ -202,5 +202,71 @@ def test_sector_count_mismatch_does_not_raise():
     )
     report = audit(io)
     assert report.structure.status == "FAIL"
-    assert report.accounting.status == "AVAILABLE"
+    assert report.accounting.status == "SKIPPED"
     assert report.accounting.by_sector == []
+
+
+def test_input_adjustments_are_required_and_aggregated_by_user():
+    z = np.array([[2.0, 1.0], [1.0, 3.0]])
+    x = np.array([8.0, 9.0])
+    v = np.array([2.0, 3.0])
+    external_inputs = np.array([[1.0, 2.0], [2.0, 0.0]])
+    convention = AccountingConvention.domestic_competitive(
+        trade_representation="embedded",
+        input_representation="adjustments_required",
+    )
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=np.array([5.0, 5.0]),
+            V=v,
+            external_inputs_by_user=external_inputs,
+            accounting=convention,
+        )
+    )
+    assert report.accounting.input_balance.status == "PASS"
+    assert report.accounting.input_adjustment_applied is True
+    assert report.accounting.external_inputs_used is True
+    assert report.accounting.input_balance.equation.endswith("+ input_adjustment")
+
+
+def test_input_adjustments_required_without_data_is_skipped():
+    convention = AccountingConvention.domestic_competitive(
+        trade_representation="embedded",
+        input_representation="adjustments_required",
+    )
+    report = audit(
+        IOSystem(
+            np.eye(2),
+            np.array([2.0, 2.0]),
+            ["a", "b"],
+            Y=np.ones(2),
+            V=np.ones(2),
+            accounting=convention,
+        )
+    )
+    assert report.accounting.input_balance.status == "SKIPPED"
+    assert "adjustment" in report.accounting.input_balance.reason
+
+
+def test_two_input_adjustment_representations_are_not_added_together():
+    convention = AccountingConvention.domestic_competitive(
+        trade_representation="embedded",
+        input_representation="complete",
+    )
+    report = audit(
+        IOSystem(
+            np.eye(1),
+            np.array([3.0]),
+            ["a"],
+            Y=np.array([2.0]),
+            V=np.array([2.0]),
+            external_inputs_by_user=np.array([1.0]),
+            input_adjustments_by_user=np.array([1.0]),
+            accounting=convention,
+        )
+    )
+    assert report.accounting.input_balance.status == "SKIPPED"
+    assert "supplied together" in report.accounting.input_balance.reason

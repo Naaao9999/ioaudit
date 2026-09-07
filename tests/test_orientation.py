@@ -31,6 +31,29 @@ def test_transposed_table_indeterminate():
     assert report.orientation.possible_transpose is None
 
 
+def test_orientation_uses_declared_input_adjustments():
+    z = np.array([[2.0, 1.0], [4.0, 3.0]])
+    x = np.array([8.0, 9.0])
+    convention = AccountingConvention.domestic_competitive(
+        trade_representation="embedded",
+        input_representation="adjustments_required",
+    )
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=np.array([5.0, 2.0]),
+            V=np.array([1.0, 2.0]),
+            input_adjustments_by_user=np.array([1.0, 3.0]),
+            accounting=convention,
+        )
+    )
+    assert report.accounting.input_balance.status == "PASS"
+    assert report.orientation.current_orientation_accounting_residual == 0
+    assert report.orientation.possible_transpose is False
+
+
 def test_no_evidence_is_indeterminate(normal_io):
     io = IOSystem(normal_io.Z, normal_io.x, normal_io.sectors)
     assert audit(io).orientation.possible_transpose is None

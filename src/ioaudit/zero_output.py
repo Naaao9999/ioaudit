@@ -26,6 +26,10 @@ class ZeroOutputDiagnostics:
     all_zero_column_indices: list[int] = field(default_factory=list)
     all_zero_rows_with_positive_output: list[Any] = field(default_factory=list)
     all_zero_columns_with_positive_output: list[Any] = field(default_factory=list)
+    all_zero_rows_with_positive_final_demand: list[Any] = field(default_factory=list)
+    all_zero_rows_without_final_demand_evidence: list[Any] = field(default_factory=list)
+    all_zero_columns_with_positive_value_added: list[Any] = field(default_factory=list)
+    all_zero_columns_without_value_added_evidence: list[Any] = field(default_factory=list)
     isolated_sectors: list[Any] = field(default_factory=list)
     isolated_indices: list[int] = field(default_factory=list)
 
@@ -101,6 +105,32 @@ def diagnose_zero_output(
 
     final_demand = _aggregate(y, 0, z_shape[0])
     value_added = _aggregate(v, 1, z_shape[1])
+    if final_demand is None:
+        result.all_zero_rows_without_final_demand_evidence = list(result.all_zero_rows)
+    else:
+        result.all_zero_rows_with_positive_final_demand = [
+            sectors[i] if i < len(sectors) else i
+            for i in row_indices
+            if i < len(final_demand) and final_demand[i] > 0
+        ]
+        result.all_zero_rows_without_final_demand_evidence = [
+            sectors[i] if i < len(sectors) else i
+            for i in row_indices
+            if i < len(final_demand) and final_demand[i] <= 0
+        ]
+    if value_added is None:
+        result.all_zero_columns_without_value_added_evidence = list(result.all_zero_columns)
+    else:
+        result.all_zero_columns_with_positive_value_added = [
+            sectors[i] if i < len(sectors) else i
+            for i in column_indices
+            if i < len(value_added) and value_added[i] > 0
+        ]
+        result.all_zero_columns_without_value_added_evidence = [
+            sectors[i] if i < len(sectors) else i
+            for i in column_indices
+            if i < len(value_added) and value_added[i] <= 0
+        ]
     if final_demand is not None and value_added is not None:
         for index in range(min(z_shape[0], z_shape[1], len(sectors))):
             if index in row_indices and index in column_indices and final_demand[index] == 0 and value_added[index] == 0:

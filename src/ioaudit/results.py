@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 import json
 import math
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -148,7 +149,7 @@ class AuditReport:
         _flatten(self.to_dict(), "", rows)
         return pd.DataFrame(rows, columns=["path", "value"])
 
-    def _boolean_failures(self) -> list[str]:
+    def _boolean_failures(self, *, include_reference: bool = False) -> list[str]:
         failures: list[str] = []
         if getattr(self.structure, "status", None) == "FAIL":
             failures.append("structure.status")
@@ -171,8 +172,51 @@ class AuditReport:
             failures.append("stability.leontief_inverse_finite")
         if getattr(self.stability, "status", None) == "FAIL":
             failures.append("stability.status")
-        if getattr(self.reference, "status", None) == "FAIL":
+        if include_reference and getattr(self.reference, "status", None) == "FAIL":
             failures.append("reference.status")
+        return failures
+
+    def _completeness_failures(self) -> list[str]:
+        """Return checks that are unavailable for a complete-audit gate."""
+
+        failures: list[str] = []
+        if getattr(self.accounting, "status", None) == "SKIPPED":
+            failures.append("accounting.status")
+        for name in ("input_balance", "output_balance"):
+            if getattr(getattr(self.accounting, name, None), "status", None) == "SKIPPED":
+                failures.append(f"accounting.{name}.status")
+        if getattr(self.coefficients, "status", None) == "SKIPPED":
+            failures.append("coefficients.status")
+        if getattr(self.stability, "status", None) == "SKIPPED":
+            failures.append("stability.status")
+        return failures
+
+    def _availability_failures(self, paths: Iterable[str] | None) -> list[str]:
+        """Return requested report paths that are unavailable or skipped."""
+
+        failures: list[str] = []
+        if paths is None:
+            return failures
+        if isinstance(paths, str):
+            requested = [paths]
+        else:
+            try:
+                requested = list(paths)
+            except TypeError as exc:
+                raise IOAuditError("require_available must be an iterable of report paths") from exc
+        for path in requested:
+            if not isinstance(path, str) or not path.strip():
+                failures.append(f"invalid required-available path: {path!r}")
+                continue
+            value = self._get_path(self, path)
+            if value is _MISSING or value is None:
+                failures.append(f"required report path unavailable: {path}")
+                continue
+            status = getattr(value, "status", None)
+            if status == "SKIPPED":
+                failures.append(f"required report path skipped: {path}")
+            elif status == "FAIL":
+                failures.append(f"required report path failed: {path}")
         return failures
 
     def _sync_provenance(self) -> None:
@@ -256,8 +300,20 @@ class AuditReport:
         fail_on_boolean: bool = True,
         max_relative_residual: float | None = None,
         max_spectral_radius: float = 1.0,
+        require_complete: bool = False,
+        require_available: Iterable[str] | None = None,
+        fail_on_reference: bool = False,
     ) -> None:
-        """Raise :class:`IOAuditError` when configured checks fail."""
+        """Raise :class:`IOAuditError` when configured checks fail.
+
+        ``require_complete=True`` additionally rejects audits where the
+        accounting, coefficient, or stability checks are unavailable.  The
+        default remains permissive because Y, V, references, and conventions
+        are optional in the v0.1 API.
+
+        ``fail_on_reference=True`` explicitly includes an invalid optional
+        reference matrix in the boolean gate.
+        """
 
         thresholds = dict(self.thresholds)
         thresholds["stability.spectral_radius"] = max_spectral_radius
@@ -267,19 +323,40 @@ class AuditReport:
         self._sync_provenance()
         failures: list[str] = []
         if fail_on_boolean:
-            failures.extend(self._boolean_failures())
+            failures.extend(self._boolean_failures(include_reference=fail_on_reference))
+        if require_complete:
+            failures.extend(self._completeness_failures())
+        failures.extend(self._availability_failures(require_available))
         failures.extend(self._threshold_failures(thresholds, raise_invalid=True))
         if failures:
             raise IOAuditError("IO audit failed: " + "; ".join(failures))
 
-    def passed(self, thresholds: dict[str, float] | None = None) -> bool:
-        """Return whether boolean checks and supplied thresholds pass."""
+    def passed(
+        self,
+        thresholds: dict[str, float] | None = None,
+        *,
+        require_complete: bool = False,
+        require_available: Iterable[str] | None = None,
+        fail_on_reference: bool = False,
+    ) -> bool:
+        """Return whether checks and supplied thresholds pass.
+
+        By default, optional or unavailable diagnostics do not fail this
+        boolean gate.  Set ``require_complete=True`` when both accounting
+        sides and downstream numerical diagnostics must be available.
+        Set ``fail_on_reference=True`` to include an invalid optional
+        reference matrix in the boolean gate.
+        """
 
         if thresholds is not None:
             self.thresholds.update(dict(thresholds))
             self._sync_provenance()
         active = dict(self.thresholds)
-        return not self._boolean_failures() and not self._threshold_failures(active)
+        failures = self._boolean_failures(include_reference=fail_on_reference)
+        if require_complete:
+            failures.extend(self._completeness_failures())
+        failures.extend(self._availability_failures(require_available))
+        return not failures and not self._threshold_failures(active)
 
     def summary(self) -> str:
         """Return a short human-readable audit summary."""
@@ -321,10 +398,10 @@ class AuditReport:
             ("Input balance max rel. residual", getattr(self.accounting, "input_balance", None)),
             ("Output balance max rel. residual", getattr(self.accounting, "output_balance", None)),
         ):
+            status = getattr(balance, "status", None)
+            if status is not None:
+                lines.append(f"{label.replace(' max rel. residual', ' status')}: {status}")
             value = getattr(balance, "max_relative_residual", None)
             if value is not None:
                 lines.append(f"{label}: {value:.6g}")
-                status = getattr(balance, "status", None)
-                if status in {"ROUNDING_LEVEL", "FAIL"}:
-                    lines.append(f"{label.replace('max rel. residual', 'status')}: {status}")
         return "\n".join(lines)

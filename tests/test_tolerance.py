@@ -27,6 +27,13 @@ def test_rounding_aware_accounting_marks_small_nonzero_residual():
     report.raise_for_status()
 
 
+def test_nonzero_residual_without_tolerance_is_available_not_pass():
+    report = audit(_io_with_output_residual(0.5))
+    assert report.accounting.output_balance.status == "AVAILABLE"
+    assert report.accounting.output_balance.max_absolute_residual == 0.5
+    assert report.passed() is True
+
+
 def test_rounding_aware_accounting_marks_large_residual_as_fail():
     report = audit(
         _io_with_output_residual(2.0),

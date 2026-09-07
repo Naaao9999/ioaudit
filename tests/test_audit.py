@@ -9,6 +9,8 @@ def test_summary_and_serialization(normal_io):
     report = audit(normal_io)
     summary = report.summary()
     assert "IO Audit Report" in summary
+    assert "Input balance status: PASS" in summary
+    assert "Output balance status: PASS" in summary
     payload = report.to_dict()
     assert payload["structure"]["status"] == "PASS"
     assert json.loads(report.to_json())["methods"]["numerical_method"] == "dense"
@@ -82,3 +84,32 @@ def test_explicit_threshold_fails_when_accounting_metric_is_unavailable():
     assert report.passed({"accounting.max_relative_residual": 1e-4}) is False
     with pytest.raises(IOAuditError):
         report.raise_for_status(max_relative_residual=1e-4)
+
+
+def test_require_complete_rejects_missing_optional_accounting_data(normal_io):
+    report = audit(normal_io.__class__(normal_io.Z, normal_io.x, normal_io.sectors))
+    assert report.passed() is True
+    assert report.passed(require_complete=True) is False
+    with pytest.raises(IOAuditError):
+        report.raise_for_status(require_complete=True)
+
+
+def test_require_complete_accepts_full_accounting_audit(normal_io):
+    report = audit(normal_io)
+    assert report.passed(require_complete=True) is True
+    report.raise_for_status(require_complete=True)
+
+
+def test_require_available_can_gate_selected_optional_diagnostics(normal_io):
+    report = audit(normal_io)
+    assert report.passed(require_available=["accounting.input_balance"]) is True
+    assert report.passed(require_available=["reference.A"]) is False
+    with pytest.raises(IOAuditError):
+        report.raise_for_status(require_available=["reference.A"])
+
+
+def test_require_available_rejects_unknown_paths(normal_io):
+    report = audit(normal_io)
+    assert report.passed(require_available=["reference.missing"]) is False
+    with pytest.raises(IOAuditError):
+        report.raise_for_status(require_available=["reference.missing"])

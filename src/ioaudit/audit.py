@@ -118,6 +118,10 @@ def audit(
         warnings.append("duplicate labels remain after Unicode/whitespace normalization")
     if zero_output.all_zero_rows_with_positive_output or zero_output.all_zero_columns_with_positive_output:
         warnings.append("Z contains all-zero rows or columns with positive output")
+    if zero_output.all_zero_rows_with_positive_final_demand:
+        warnings.append("Z contains all-zero rows with positive final-demand evidence")
+    if zero_output.all_zero_columns_with_positive_value_added:
+        warnings.append("Z contains all-zero columns with positive value-added evidence")
     if zero_output.isolated_sectors:
         warnings.append("isolated sectors were found from available Z/Y/V evidence")
     if orientation.possible_transpose is None:

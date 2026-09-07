@@ -10,6 +10,7 @@ IMPORT_TREATMENTS = frozenset({"competitive", "noncompetitive", "none", "unknown
 IMPORT_SIGNS = frozenset({"negative", "positive", "unknown"})
 TRADE_REPRESENTATIONS = frozenset({"embedded", "outflows_in_Y", "separate", "unknown"})
 EXTERNAL_FLOW_SCOPES = frozenset({"international", "interregional", "both", "unknown"})
+INPUT_REPRESENTATIONS = frozenset({"complete", "adjustments_required", "unknown"})
 
 
 @dataclass(frozen=True)
@@ -23,10 +24,11 @@ class AccountingConvention:
     competitive imports are interpreted according to ``inflow_sign``:
     ``negative`` means the supplied vector is ``-M`` and is added to the
     output identity, ``positive`` means it is ``M`` and is subtracted, and
-    ``unknown`` disables that adjusted check.  Noncompetitive treatment
-    requires explicit sector vectors for both imports and exports.  Missing
-    or unspecified information causes the affected check to be SKIPPED rather
-    than guessed.
+    ``unknown`` disables that adjusted check.  ``input_representation``
+    declares whether ``V`` is complete, requires an explicit user-specific
+    adjustment, or is unknown.  Noncompetitive treatment requires explicit
+    sector vectors for both imports and exports.  Missing or unspecified
+    information causes the affected check to be SKIPPED rather than guessed.
     """
 
     transaction_scope: str = "unknown"
@@ -41,6 +43,7 @@ class AccountingConvention:
     # ``inflow_sign="unknown"`` from an omitted value.
     inflow_sign: str | None = None
     outflow_sign: str = "unknown"
+    input_representation: str = "unknown"
 
     def __post_init__(self) -> None:
         supplied_import_sign = self.import_sign
@@ -73,6 +76,10 @@ class AccountingConvention:
             raise IOValidationError(
                 "outflow_sign must be 'negative', 'positive', or 'unknown'"
             )
+        if self.input_representation not in INPUT_REPRESENTATIONS:
+            raise IOValidationError(
+                "input_representation must be 'complete', 'adjustments_required', or 'unknown'"
+            )
         if supplied_import_sign is not None:
             if supplied_inflow_sign not in {None, supplied_import_sign}:
                 raise IOValidationError(
@@ -103,6 +110,7 @@ class AccountingConvention:
         trade_representation: str = "outflows_in_Y",
         external_flow_scope: str = "international",
         outflow_sign: str = "positive",
+        input_representation: str = "complete",
     ) -> "AccountingConvention":
         """Return an explicit domestic competitive-import convention.
 
@@ -119,6 +127,7 @@ class AccountingConvention:
             external_flow_scope=external_flow_scope,
             inflow_sign=inflow_sign,
             outflow_sign=outflow_sign,
+            input_representation=input_representation,
         )
 
     @classmethod
@@ -129,6 +138,7 @@ class AccountingConvention:
         external_flow_scope: str = "international",
         inflow_sign: str = "positive",
         outflow_sign: str = "positive",
+        input_representation: str = "complete",
     ) -> "AccountingConvention":
         """Return an explicit domestic noncompetitive-import convention."""
 
@@ -139,6 +149,7 @@ class AccountingConvention:
             external_flow_scope=external_flow_scope,
             inflow_sign=inflow_sign,
             outflow_sign=outflow_sign,
+            input_representation=input_representation,
         )
 
     @classmethod
@@ -152,6 +163,7 @@ class AccountingConvention:
             external_flow_scope="unknown",
             inflow_sign="unknown",
             outflow_sign="unknown",
+            input_representation="complete",
         )
 
     def to_dict(self) -> dict[str, str]:
@@ -164,6 +176,7 @@ class AccountingConvention:
             "external_flow_scope": self.external_flow_scope,
             "inflow_sign": self.inflow_sign,
             "outflow_sign": self.outflow_sign,
+            "input_representation": self.input_representation,
             # Compatibility field; it reflects the generalized inflow sign.
             "import_sign": self.inflow_sign,
             "name": self.name,
