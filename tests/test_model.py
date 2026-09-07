@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ioaudit import AccountingConvention, IOSystem
+from ioaudit import AccountingConvention, IOSystem, TradeFlows
 from ioaudit.exceptions import IOValidationError
 
 
@@ -30,7 +30,7 @@ def test_tradeflows_and_audit_do_not_mutate_source_arrays(normal_data):
         sectors,
         y,
         v,
-        imports=imports,
+        trade=TradeFlows(international_imports=imports),
         accounting=convention,
     )
     audit(io)
@@ -46,13 +46,13 @@ def test_convention_validation():
         AccountingConvention(transaction_scope="unsupported")
     with pytest.raises(IOValidationError):
         IOSystem(np.eye(2), np.ones(2), ["a", "b"], accounting="domestic")
-    with pytest.raises(IOValidationError):
+    with pytest.raises(TypeError):
         AccountingConvention(import_sign="signed")
 
 
-def test_convention_serializes_import_sign():
-    convention = AccountingConvention(import_sign="positive")
-    assert convention.to_dict()["import_sign"] == "positive"
+def test_convention_serializes_inflow_sign():
+    convention = AccountingConvention(inflow_sign="positive")
+    assert convention.to_dict()["inflow_sign"] == "positive"
 
 
 def test_plain_convention_is_conservative_and_structural_presets_are_explicit():
@@ -99,7 +99,6 @@ def test_structural_preset_without_semantic_fields_skips_affected_accounting():
             ["A"],
             Y=np.array([0.9]),
             V=np.array([0.9]),
-            imports=np.array([0.0]),
             accounting=AccountingConvention.domestic_competitive(),
         )
     )

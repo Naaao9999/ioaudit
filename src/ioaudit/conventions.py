@@ -33,21 +33,13 @@ class AccountingConvention:
 
     transaction_scope: str = "unknown"
     import_treatment: str = "unknown"
-    # Kept as a compatibility alias for the pre-TradeFlows API.  New code
-    # should use inflow_sign, which also covers interregional inflows.
-    import_sign: str | None = None
     trade_representation: str = "unknown"
     external_flow_scope: str = "unknown"
-    # ``None`` means the field was omitted.  It is normalized to ``"unknown"``
-    # below, while still allowing us to distinguish an explicit
-    # ``inflow_sign="unknown"`` from an omitted value.
-    inflow_sign: str | None = None
+    inflow_sign: str = "unknown"
     outflow_sign: str = "unknown"
     input_representation: str = "unknown"
 
     def __post_init__(self) -> None:
-        supplied_import_sign = self.import_sign
-        supplied_inflow_sign = self.inflow_sign
         if self.transaction_scope not in TRANSACTION_SCOPES:
             raise IOValidationError(
                 "transaction_scope must be 'domestic', 'total', or 'unknown'"
@@ -55,10 +47,6 @@ class AccountingConvention:
         if self.import_treatment not in IMPORT_TREATMENTS:
             raise IOValidationError(
                 "import_treatment must be 'competitive', 'noncompetitive', 'none', or 'unknown'"
-            )
-        if supplied_import_sign is not None and supplied_import_sign not in IMPORT_SIGNS:
-            raise IOValidationError(
-                "import_sign must be 'negative', 'positive', or 'unknown'"
             )
         if self.trade_representation not in TRADE_REPRESENTATIONS:
             raise IOValidationError(
@@ -68,7 +56,7 @@ class AccountingConvention:
             raise IOValidationError(
                 "external_flow_scope must be 'international', 'interregional', 'both', or 'unknown'"
             )
-        if supplied_inflow_sign is not None and supplied_inflow_sign not in IMPORT_SIGNS:
+        if self.inflow_sign not in IMPORT_SIGNS:
             raise IOValidationError(
                 "inflow_sign must be 'negative', 'positive', or 'unknown'"
             )
@@ -80,21 +68,6 @@ class AccountingConvention:
             raise IOValidationError(
                 "input_representation must be 'complete', 'adjustments_required', or 'unknown'"
             )
-        if supplied_import_sign is not None:
-            if supplied_inflow_sign not in {None, supplied_import_sign}:
-                raise IOValidationError(
-                    "import_sign and inflow_sign specify conflicting signs"
-                )
-        effective_inflow_sign = supplied_import_sign or supplied_inflow_sign or "unknown"
-        object.__setattr__(self, "inflow_sign", effective_inflow_sign)
-        object.__setattr__(self, "_import_sign_explicit", supplied_import_sign is not None)
-        object.__setattr__(
-            self,
-            "_inflow_sign_explicit",
-            supplied_import_sign is not None or supplied_inflow_sign is not None,
-        )
-        # Keep the old attribute readable as the effective generalized sign.
-        object.__setattr__(self, "import_sign", self.inflow_sign)
 
     @property
     def name(self) -> str:
@@ -183,7 +156,5 @@ class AccountingConvention:
             "inflow_sign": self.inflow_sign,
             "outflow_sign": self.outflow_sign,
             "input_representation": self.input_representation,
-            # Compatibility field; it reflects the generalized inflow sign.
-            "import_sign": self.inflow_sign,
             "name": self.name,
         }

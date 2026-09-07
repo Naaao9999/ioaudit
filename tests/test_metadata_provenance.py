@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from ioaudit import IOSystem, audit
+from ioaudit import IOSystem, TradeFlows, audit
 
 
 def test_metadata_completeness_and_provenance():
@@ -38,6 +38,6 @@ def test_provenance_hash_includes_input_side_adjustments():
         np.array([[1.0]]),
         np.array([2.0]),
         ["A"],
-        external_inputs_by_user=np.array([3.0]),
+        input_adjustments=np.array([3.0]),
     )
     assert audit(base).provenance["input_hash"] != audit(adjusted).provenance["input_hash"]

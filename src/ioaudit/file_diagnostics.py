@@ -65,7 +65,7 @@ def _flatten(value: Any, prefix: str, rows: list[dict[str, Any]]) -> None:
 
 
 @dataclass
-class CSVInspectionReport:
+class DelimitedFileReport:
     """Machine-readable, read-only diagnostics for one delimited file."""
 
     path: str
@@ -215,7 +215,7 @@ def _header_key(header: str, index: int, used: set[str]) -> str:
 
 
 def _record_token(
-    report: CSVInspectionReport,
+    report: DelimitedFileReport,
     token: str,
     column_key: str,
     line_number: int,
@@ -240,7 +240,7 @@ def _record_token(
     return False, bool(stripped)
 
 
-def _status(report: CSVInspectionReport) -> str:
+def _status(report: DelimitedFileReport) -> str:
     critical = bool(
         report.parse_error
         or report.quoting_anomaly
@@ -311,7 +311,7 @@ def inspect_csv(
     path: str | Path,
     delimiter: str | None = ",",
     encoding: str | None = None,
-) -> CSVInspectionReport:
+) -> DelimitedFileReport:
     """Inspect a CSV/delimited file without repairing or extracting an IO table.
 
     Parameters
@@ -338,7 +338,7 @@ def inspect_csv(
     physical_lines = text.splitlines()
     used_delimiter, candidate_counts = _detect_delimiter(text)
     chosen_delimiter = delimiter if delimiter is not None else used_delimiter
-    report = CSVInspectionReport(
+    report = DelimitedFileReport(
         path=str(file_path),
         encoding=used_encoding,
         bom=bom,
@@ -553,10 +553,10 @@ def inspect_delimited(
     path: str | Path,
     delimiter: str | None = ",",
     encoding: str | None = None,
-) -> CSVInspectionReport:
+) -> DelimitedFileReport:
     """General-name alias for :func:`inspect_csv`."""
 
     return inspect_csv(path, delimiter=delimiter, encoding=encoding)
 
 
-__all__ = ["CSVInspectionReport", "inspect_csv", "inspect_delimited"]
+__all__ = ["DelimitedFileReport", "inspect_csv", "inspect_delimited"]

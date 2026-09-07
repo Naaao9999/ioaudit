@@ -232,7 +232,7 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
         for candidate in result.possible_subtotal_columns + result.possible_subtotal_rows
     ]
     if available:
-        result.status = "AVAILABLE"
+        result.status = "WARNING" if result.double_count_risk else "AVAILABLE"
     else:
         result.reason = "Y/V has no auditable multi-component dimension"
     return result

@@ -81,7 +81,7 @@ class AuditReport:
         orientation: Any,
         accounting: Any,
         signs: Any,
-        zero_output: Any,
+        zero_structure: Any,
         coefficients: Any,
         stability: Any,
         reference: Any,
@@ -98,7 +98,7 @@ class AuditReport:
         self.orientation = orientation
         self.accounting = accounting
         self.signs = signs
-        self.zero_output = zero_output
+        self.zero_structure = zero_structure
         self.coefficients = coefficients
         self.stability = stability
         self.reference = reference
@@ -120,7 +120,7 @@ class AuditReport:
                 "orientation": self.orientation,
                 "accounting": self.accounting,
                 "signs": self.signs,
-                "zero_output": self.zero_output,
+                "zero_structure": self.zero_structure,
                 "coefficients": self.coefficients,
                 "stability": self.stability,
                 "reference": self.reference,
@@ -157,8 +157,8 @@ class AuditReport:
             failures.append("orientation.status")
         if getattr(self.orientation, "possible_transpose", None) is True:
             failures.append("orientation.possible_transpose")
-        if getattr(self.zero_output, "inconsistent_sectors", []):
-            failures.append("zero_output.inconsistent_sectors")
+        if getattr(self.zero_structure, "inconsistent_sectors", []):
+            failures.append("zero_structure.inconsistent_sectors")
         for name in ("input_balance", "output_balance"):
             if getattr(getattr(self.accounting, name, None), "status", None) == "FAIL":
                 failures.append(f"accounting.{name}.status")
@@ -295,6 +295,37 @@ class AuditReport:
                 failures.append(f"{path}={numeric} exceeds threshold {limit}")
         return failures
 
+    def _gate_failures(
+        self,
+        *,
+        thresholds: dict[str, float] | None = None,
+        fail_on_boolean: bool = True,
+        max_relative_residual: float | None = None,
+        max_spectral_radius: float | None = 1.0,
+        require_complete: bool = False,
+        require_available: Iterable[str] | None = None,
+        fail_on_reference: bool = False,
+        raise_invalid: bool = False,
+    ) -> tuple[list[str], dict[str, float]]:
+        """Evaluate all CI gate rules and return failures plus active limits."""
+
+        active = dict(self.thresholds)
+        supplied = dict(thresholds or {})
+        active.update(supplied)
+        if max_spectral_radius is not None and "stability.spectral_radius" not in supplied:
+            active["stability.spectral_radius"] = max_spectral_radius
+        if max_relative_residual is not None:
+            active["accounting.max_relative_residual"] = max_relative_residual
+
+        failures: list[str] = []
+        if fail_on_boolean:
+            failures.extend(self._boolean_failures(include_reference=fail_on_reference))
+        if require_complete:
+            failures.extend(self._completeness_failures())
+        failures.extend(self._availability_failures(require_available))
+        failures.extend(self._threshold_failures(active, raise_invalid=raise_invalid))
+        return failures, active
+
     def raise_for_status(
         self,
         fail_on_boolean: bool = True,
@@ -315,19 +346,17 @@ class AuditReport:
         reference matrix in the boolean gate.
         """
 
-        thresholds = dict(self.thresholds)
-        thresholds["stability.spectral_radius"] = max_spectral_radius
-        if max_relative_residual is not None:
-            thresholds["accounting.max_relative_residual"] = max_relative_residual
+        failures, thresholds = self._gate_failures(
+            fail_on_boolean=fail_on_boolean,
+            max_relative_residual=max_relative_residual,
+            max_spectral_radius=max_spectral_radius,
+            require_complete=require_complete,
+            require_available=require_available,
+            fail_on_reference=fail_on_reference,
+            raise_invalid=True,
+        )
         self.thresholds.update(thresholds)
         self._sync_provenance()
-        failures: list[str] = []
-        if fail_on_boolean:
-            failures.extend(self._boolean_failures(include_reference=fail_on_reference))
-        if require_complete:
-            failures.extend(self._completeness_failures())
-        failures.extend(self._availability_failures(require_available))
-        failures.extend(self._threshold_failures(thresholds, raise_invalid=True))
         if failures:
             raise IOAuditError("IO audit failed: " + "; ".join(failures))
 
@@ -335,6 +364,9 @@ class AuditReport:
         self,
         thresholds: dict[str, float] | None = None,
         *,
+        fail_on_boolean: bool = True,
+        max_relative_residual: float | None = None,
+        max_spectral_radius: float | None = 1.0,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
         fail_on_reference: bool = False,
@@ -348,15 +380,16 @@ class AuditReport:
         reference matrix in the boolean gate.
         """
 
-        if thresholds is not None:
-            self.thresholds.update(dict(thresholds))
-            self._sync_provenance()
-        active = dict(self.thresholds)
-        failures = self._boolean_failures(include_reference=fail_on_reference)
-        if require_complete:
-            failures.extend(self._completeness_failures())
-        failures.extend(self._availability_failures(require_available))
-        return not failures and not self._threshold_failures(active)
+        failures, _ = self._gate_failures(
+            thresholds=thresholds,
+            fail_on_boolean=fail_on_boolean,
+            max_relative_residual=max_relative_residual,
+            max_spectral_radius=max_spectral_radius,
+            require_complete=require_complete,
+            require_available=require_available,
+            fail_on_reference=fail_on_reference,
+        )
+        return not failures
 
     def summary(self) -> str:
         """Return a short human-readable audit summary."""
@@ -364,16 +397,12 @@ class AuditReport:
         structure_status = getattr(self.structure, "status", "SKIPPED")
         orientation_status = getattr(self.orientation, "status", "SKIPPED")
         accounting_status = getattr(self.accounting, "status", "SKIPPED")
-        if accounting_status == "SKIPPED":
-            accounting_label = "SKIPPED"
-        else:
-            accounting_label = "AVAILABLE"
         invertible = getattr(self.stability, "invertible", None)
         leontief_label = "SOLVABLE" if invertible is True else ("UNSOLVABLE" if invertible is False else "SKIPPED")
         rho = getattr(self.stability, "spectral_radius", None)
         cond = getattr(self.stability, "condition_number", None)
         negative_count = getattr(self.signs, "total_negative_entries", 0)
-        zero_count = len(getattr(self.zero_output, "zero_output_indices", []))
+        zero_count = len(getattr(self.zero_structure, "zero_output_indices", []))
         scale_count = getattr(self.scale, "total_candidates", 0) if self.scale is not None else 0
         component_count = len(getattr(self.components, "double_count_risk", [])) if self.components is not None else 0
         metadata_status = getattr(self.metadata, "status", "SKIPPED") if self.metadata is not None else "SKIPPED"
@@ -382,7 +411,7 @@ class AuditReport:
             "===============",
             f"Structure                {structure_status}",
             f"Orientation              {orientation_status}",
-            f"Accounting               {accounting_label}",
+            f"Accounting               {accounting_status}",
             f"Signs                    {negative_count} negative entries",
             f"Zero-output sectors      {zero_count}",
             f"Scale candidates         {scale_count}",

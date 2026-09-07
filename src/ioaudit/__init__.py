@@ -3,7 +3,7 @@
 from .audit import audit
 from .conventions import AccountingConvention
 from .exceptions import IOAuditError, IONumericalError, IOValidationError
-from .file_diagnostics import CSVInspectionReport, inspect_csv, inspect_delimited
+from .file_diagnostics import DelimitedFileReport, inspect_csv, inspect_delimited
 from .model import IOSystem, TradeFlows
 from .results import AuditReport
 
@@ -13,7 +13,7 @@ __all__ = [
     "AccountingConvention",
     "AuditReport",
     "audit",
-    "CSVInspectionReport",
+    "DelimitedFileReport",
     "inspect_csv",
     "inspect_delimited",
     "IOAuditError",

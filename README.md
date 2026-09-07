@@ -47,7 +47,7 @@ print(report.summary())
 report.structure
 report.orientation
 report.accounting
-report.zero_output
+report.zero_structure
 report.coefficients
 report.stability
 report.reference
@@ -66,7 +66,8 @@ report.provenance
 - `FAIL`: 明示的な不整合または設定した閾値違反が確認された
 - `WARNING`: 確認すべき候補や証拠がある
 - `SKIPPED`: 必要な情報が不足しており、安全に判定できない
-- `ROUNDING_LEVEL`: 非ゼロ残差が、明示した丸め許容範囲内にある
+- `AVAILABLE`: 計算できたが、合否を決める基準が指定されていない
+- `PASS` + `residual_class="rounding_level"`: 非ゼロ残差が、明示した丸め許容範囲内にある
 
 `SKIPPED` は「問題なし」を意味しません。`ioaudit` が推測を避けたことを意味します。
 
@@ -255,7 +256,7 @@ report = audit(
 )
 ```
 
-許容範囲内の非ゼロ残差は `ROUNDING_LEVEL` として記録されます。指定した tolerance は provenance に保存され、入力値そのものは変更されません。
+許容範囲内の非ゼロ残差は `PASS` と `residual_class="rounding_level"` として記録されます。指定した tolerance は provenance に保存され、入力値そのものは変更されません。
 
 ## 移輸入・移輸出
 
@@ -520,7 +521,7 @@ Individual diagnostics are available through the returned `AuditReport`:
 report.structure
 report.orientation
 report.accounting
-report.zero_output
+report.zero_structure
 report.coefficients
 report.stability
 report.reference
@@ -539,7 +540,8 @@ report.provenance
 - `FAIL`: an explicit inconsistency or configured threshold violation was identified
 - `WARNING`: evidence or a candidate issue requires review
 - `SKIPPED`: the available information is insufficient for a safe determination
-- `ROUNDING_LEVEL`: a non-zero residual is within an explicitly declared rounding tolerance
+- `AVAILABLE`: the calculation ran, but no pass/fail criterion was declared
+- `PASS` with `residual_class="rounding_level"`: a non-zero residual is within an explicitly declared rounding tolerance
 
 `SKIPPED` does not mean that the data passed. It means that `ioaudit` declined to infer missing semantics.
 
@@ -726,16 +728,16 @@ io = IOSystem(
     sectors=sectors,
     Y=Y,
     V=V,
-    input_adjustments_by_user=adjustments,
+    input_adjustments=adjustments,
     accounting=accounting,
 )
 ```
 
-`external_inputs_by_user` と `input_adjustments_by_user` は代替表現です。同時指定は二重計上の可能性があるため、投入側会計を `SKIPPED` にします。`input_representation="unknown"`（`AccountingConvention()` の既定値）では、Vが完全な付加価値か外部調整を要するかを推測しません。
+投入側の外部調整は `input_adjustments` に一本化しています。`input_representation="unknown"`（`AccountingConvention()` の既定値）では、Vが完全な付加価値か外部調整を要するかを推測しません。
 
 2次元の外部投入調整では、DataFrameの列が購入部門を表します。列ラベルが `sectors` と順序まで一致しない場合、位置ベースの加算を行わず投入側会計を `SKIPPED` にします。Unicode・空白の正規化後だけ一致する場合は、宣言された順序で使用し、WARNINGを記録します。
 
-If `V` contains only domestic value-added items and user-specific external input adjustments are required, declare `input_representation="adjustments_required"`. The signed adjustment can have shape `(n,)` or `(m, n)`; the latter is summed over input rows. `external_inputs_by_user` and `input_adjustments_by_user` are alternative representations. Supplying both skips the input balance to avoid ambiguous double counting. `input_representation="unknown"` never infers whether `V` is complete.
+If `V` contains only domestic value-added items and user-specific external input adjustments are required, declare `input_representation="adjustments_required"`. The signed `input_adjustments` value can have shape `(n,)` or `(m, n)`; the latter is summed over input rows. `input_representation="unknown"` never infers whether `V` is complete.
 
 ### Competitive import sign convention / 競争輸入の符号規約
 
@@ -743,19 +745,19 @@ v0.1 の `domestic/competitive` では、`inflow_sign="negative" | "positive" | 
 
 For `domestic/competitive` in v0.1, use `inflow_sign="negative" | "positive" | "unknown"`. Use `inflow_sign="negative"` for signed negative import rows commonly found in Japanese IO tables, and `inflow_sign="positive"` when imports are stored as positive magnitudes `M`.
 
-`negative` は `imports=-M` として `x = row_sum(Z) + f + imports`、`positive` は `imports=M` として `x = row_sum(Z) + f - imports` を適用します。`unknown` では符号を推測せず、調整済みの産出側会計監査を `SKIPPED` にします。旧APIの `import_sign` は `inflow_sign` の互換エイリアスです。
+`negative` は流入ベクトルを負値として扱い、`positive` は正の規模として扱います。`unknown` では符号を推測せず、調整済みの産出側会計監査を `SKIPPED` にします。公開APIでは一般化された `inflow_sign` を使用します。
 
-`negative` applies `x = row_sum(Z) + f + imports` for `imports=-M`; `positive` applies `x = row_sum(Z) + f - imports` for `imports=M`. With `unknown`, no sign inference is performed and the adjusted output balance is `SKIPPED`. The legacy `import_sign` argument is accepted as a compatibility alias for `inflow_sign`.
+`negative` treats the inflow vector as a signed negative value; `positive` treats it as a positive magnitude. With `unknown`, no sign inference is performed and the adjusted output balance is `SKIPPED`. The public API uses the generalized `inflow_sign` field.
 
-`import_treatment="none"` または `transaction_scope="total"` では import sign は会計計算に適用されず、レポートに `import_sign not applicable` が残ります。`trade_representation="unknown"` はこの指定より優先され、Yとの関係が不明なため産出側会計を `SKIPPED` にします。
+`import_treatment="none"` または `transaction_scope="total"` では流入符号は会計計算に適用されず、レポートに `inflow_sign not applicable` が残ります。`trade_representation="unknown"` はこの指定より優先され、Yとの関係が不明なため産出側会計を `SKIPPED` にします。
 
-With `import_treatment="none"` or `transaction_scope="total"`, the import sign is not applied and the report records `import_sign not applicable`. `trade_representation="unknown"` takes precedence and skips output accounting because the relationship between `Y` and trade is unknown.
+With `import_treatment="none"` or `transaction_scope="total"`, the inflow sign is not applied and the report records `inflow_sign not applicable`. `trade_representation="unknown"` takes precedence and skips output accounting because the relationship between `Y` and trade is unknown.
 
 ## TradeFlows / 交易フロー
 
 地域表・全国表の交易は、`imports` / `exports` の個別引数ではなく `TradeFlows` にまとめて指定します。
 
-For national and regional tables, provide trade through `TradeFlows` instead of separate legacy `imports` / `exports` arguments.
+For national and regional tables, provide trade through `TradeFlows`. Separate `imports` / `exports` arguments are not part of the v0.1 API.
 
 ```python
 trade = TradeFlows(
@@ -792,9 +794,9 @@ When a subtotal candidate is detected, the corresponding output or input balance
 
 `report.structure` includes possible non-sector rows and columns, exact duplicate rows and columns, normalized label matches, and `duplicate_labels_after_normalization`. Labels such as `合計`, `輸入`, `最終需要`, and `付加価値` are reported as possible non-sector content in `Z`.
 
-`report.zero_output` は、`all_zero_rows`、`all_zero_columns`、`isolated_sectors` に加え、全ゼロ行・列が最終需要や付加価値で支えられている証拠を返します。これらは切り出しや欠損の確認材料であり、自動削除やゼロ置換は行いません。
+`report.zero_structure` は、`all_zero_rows`、`all_zero_columns`、`isolated_sectors` に加え、全ゼロ行・列が最終需要や付加価値で支えられている証拠を返します。これらは切り出しや欠損の確認材料であり、自動削除やゼロ置換は行いません。
 
-`report.zero_output` returns `all_zero_rows`, `all_zero_columns`, `isolated_sectors`, and separate evidence lists for positive final demand and positive value added. These are evidence for checking extraction and missing values; no rows are deleted and no values are replaced with zero.
+`report.zero_structure` returns `all_zero_rows`, `all_zero_columns`, `isolated_sectors`, and separate evidence lists for positive final demand and positive value added. These are evidence for checking extraction and missing values; no rows are deleted and no values are replaced with zero.
 
 ## Accounting tolerance / 会計許容差
 
@@ -813,12 +815,12 @@ report = audit(
 )
 ```
 
-A non-zero residual within the declared tolerance is reported as `ROUNDING_LEVEL`.
+A non-zero residual within the declared tolerance is reported as `PASS` with `residual_class="rounding_level"`.
 
 The selected tolerance is stored in the report provenance. Input values are never changed.
-会計診断は、完全一致なら `PASS`、許容差なしで残差がある場合は `AVAILABLE`（残差値を参照）、許容範囲内の丸め差なら `ROUNDING_LEVEL`、許容範囲外なら `FAIL` を返します。`raise_for_status()` は既定では会計相対残差ゲートを追加しません。相対残差をCI条件にする場合は `report.raise_for_status(max_relative_residual=1e-4)` のように明示してください。`max_spectral_radius` の既定値は `1.0` です。
+会計診断は、完全一致なら `PASS`、許容差なしで残差がある場合は `AVAILABLE`（残差値を参照）、許容範囲内の丸め差なら `PASS` + `residual_class="rounding_level"`、許容範囲外なら `FAIL` を返します。`raise_for_status()` は既定では会計相対残差ゲートを追加しません。相対残差をCI条件にする場合は `report.raise_for_status(max_relative_residual=1e-4)` のように明示してください。`max_spectral_radius` の既定値は `1.0` です。
 
-Accounting diagnostics return `PASS` for exact agreement, `AVAILABLE` for a nonzero residual without a declared tolerance, `ROUNDING_LEVEL` for residuals within the declared tolerance, and `FAIL` otherwise. `raise_for_status()` does not add an accounting relative-residual gate by default. Add one explicitly for CI, for example `report.raise_for_status(max_relative_residual=1e-4)`. The default `max_spectral_radius` is `1.0`.
+Accounting diagnostics return `PASS` for exact agreement, `AVAILABLE` for a nonzero residual without a declared tolerance, `PASS` with `residual_class="rounding_level"` for residuals within the declared tolerance, and `FAIL` otherwise. `raise_for_status()` does not add an accounting relative-residual gate by default. Add one explicitly for CI, for example `report.raise_for_status(max_relative_residual=1e-4)`. The default `max_spectral_radius` is `1.0`.
 
 任意の入力不足を許容する通常のゲートとは別に、両側の会計診断と数値診断が利用可能であることを要求できます。
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ioaudit import AccountingConvention, IOSystem
+from ioaudit import AccountingConvention, IOSystem, TradeFlows
 
 
 @pytest.fixture
@@ -24,4 +24,12 @@ def normal_data():
 @pytest.fixture
 def normal_io(normal_data):
     z, x, sectors, y, v, convention = normal_data
-    return IOSystem(Z=z, x=x, sectors=sectors, Y=y, V=v, imports=np.zeros_like(x), accounting=convention)
+    return IOSystem(
+        Z=z,
+        x=x,
+        sectors=sectors,
+        Y=y,
+        V=v,
+        trade=TradeFlows(international_imports=np.zeros_like(x)),
+        accounting=convention,
+    )

@@ -23,7 +23,7 @@ class NegativeEntries:
 class SignDiagnostics:
     """Negative-entry diagnostics; negative values are informational."""
 
-    status: str = "PASS"
+    status: str = "AVAILABLE"
     negative_transaction_cells: NegativeEntries = field(default_factory=NegativeEntries)
     negative_final_demand: NegativeEntries = field(default_factory=NegativeEntries)
     negative_value_added: NegativeEntries = field(default_factory=NegativeEntries)
@@ -116,8 +116,8 @@ def diagnose_signs(io: Any) -> SignDiagnostics:
             z_index,
         )
     else:
-        negative_imports = _negative(getattr(io, "imports", None), "imports", z_index)
-        negative_exports = _negative(getattr(io, "exports", None), "exports", z_index)
+        negative_imports = NegativeEntries()
+        negative_exports = NegativeEntries()
     result = SignDiagnostics(
         negative_transaction_cells=_negative(io.Z, "Z", z_index, z_columns),
         negative_final_demand=_negative(io.Y, "Y", y_index),

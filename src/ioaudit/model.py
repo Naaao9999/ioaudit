@@ -116,22 +116,14 @@ class IOSystem:
         sectors: Sequence[Any],
         Y: Any = None,
         V: Any = None,
-        imports: Any = None,
-        exports: Any = None,
-        employment: Any = None,
-        satellites: Any = None,
+        *,
+        trade: TradeFlows | None = None,
+        input_adjustments: Any = None,
         A_reference: Any = None,
         L_reference: Any = None,
         metadata: dict[str, Any] | None = None,
         accounting: AccountingConvention | None = None,
-        trade: TradeFlows | None = None,
-        external_inputs_by_user: Any = None,
-        input_adjustments_by_user: Any = None,
     ) -> None:
-        # ``trade`` is the canonical keyword.  Accepting it in the historical
-        # sixth positional slot keeps migration from imports= convenient.
-        if isinstance(imports, TradeFlows) and trade is None and exports is None:
-            trade, imports = imports, None
         if Z is None:
             raise IOValidationError("Z is required")
         if x is None:
@@ -151,31 +143,10 @@ class IOSystem:
             raise IOValidationError("sectors must be a finite sequence") from exc
         self.Y = _copy_value(Y, "Y")
         self.V = _copy_value(V, "V")
-        self.imports = _copy_value(imports, "imports")
-        self.exports = _copy_value(exports, "exports")
-        self.employment = _copy_value(employment, "employment")
-        self.satellites = _copy_value(satellites, "satellites")
+        self.input_adjustments = _copy_value(input_adjustments, "input_adjustments")
         self.A_reference = _copy_value(A_reference, "A_reference")
         self.L_reference = _copy_value(L_reference, "L_reference")
-        self.external_inputs_by_user = _copy_value(
-            external_inputs_by_user, "external_inputs_by_user"
-        )
-        self.input_adjustments_by_user = _copy_value(
-            input_adjustments_by_user, "input_adjustments_by_user"
-        )
-        self.trade = (
-            TradeFlows(
-                international_imports=imports,
-                international_exports=exports,
-            )
-            if trade is None and (imports is not None or exports is not None)
-            else (TradeFlows(**trade.__dict__) if trade is not None else None)
-        )
-        self._trade_explicit = trade is not None
-        self._legacy_trade_fields_supplied = imports is not None or exports is not None
-        # Retain these attributes for source compatibility with v0.1.  New
-        # code should use ``trade``; the audit treats both representations as
-        # conflicting if they are supplied simultaneously.
+        self.trade = TradeFlows(**trade.__dict__) if trade is not None else None
         if metadata is None:
             self.metadata = {}
         else:

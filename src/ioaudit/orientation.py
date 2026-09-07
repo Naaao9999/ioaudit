@@ -7,13 +7,13 @@ from typing import Any
 
 import numpy as np
 
-from .accounting import (
-    _axis_sum,
-    _inflow_adjustment,
-    _outflow_adjustment,
-    _resolve_input_adjustment,
-    _trade_side,
-    _vector,
+from ._balance_core import (
+    axis_sum as _axis_sum,
+    inflow_adjustment as _inflow_adjustment,
+    outflow_adjustment as _outflow_adjustment,
+    resolve_input_adjustment as _resolve_input_adjustment,
+    trade_side as _trade_side,
+    vector as _vector,
 )
 from .structure import _all_finite, _labels, _shape_of
 
@@ -46,23 +46,9 @@ def _score(
         base = _axis_sum(z, 1) + f
         residual = None
         trade = getattr(io, "trade", None)
-        trade_conflict = getattr(io, "_trade_explicit", False) and getattr(
-            io, "_legacy_trade_fields_supplied", False
-        )
         representation = convention.trade_representation
-        legacy_noncompetitive = (
-            not getattr(io, "_trade_explicit", False)
-            and getattr(io, "_legacy_trade_fields_supplied", False)
-            and convention.import_treatment == "noncompetitive"
-            and getattr(io, "exports", None) is not None
-            and not getattr(convention, "_inflow_sign_explicit", False)
-        )
-        if legacy_noncompetitive and representation == "outflows_in_Y":
-            representation = "separate"
-        inflow_sign = "positive" if legacy_noncompetitive else convention.inflow_sign
-        if trade_conflict:
-            residual = None
-        elif (
+        inflow_sign = convention.inflow_sign
+        if (
             representation == "unknown"
             or convention.transaction_scope == "unknown"
             or convention.import_treatment == "unknown"

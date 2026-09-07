@@ -21,6 +21,7 @@ class MatrixComparison:
     mean_absolute_difference: float | None = None
     rmse: float | None = None
     relative_difference: float | None = None
+    difference_class: str | None = None
     shape_consistency: bool | None = None
     label_consistency: bool | None = None
     reason: str | None = None
@@ -90,7 +91,21 @@ def _compare(calculated: np.ndarray | None, reference: Any, target: Any, sectors
     result.relative_difference = float(np.linalg.norm(difference) / denominator) if denominator else (
         0.0 if not np.any(difference) else float("inf")
     )
-    result.status = "FAIL" if result.label_consistency is False else "PASS"
+    exact = bool(
+        np.all(
+            absolute
+            <= np.finfo(float).eps * np.maximum(1.0, np.abs(ref_array))
+        )
+    )
+    if result.label_consistency is False:
+        result.status = "FAIL"
+        result.difference_class = "label_mismatch"
+    elif exact:
+        result.status = "PASS"
+        result.difference_class = "exact"
+    else:
+        result.status = "AVAILABLE"
+        result.difference_class = "numeric_difference"
     return result
 
 
@@ -107,5 +122,10 @@ def diagnose_reference(
     comparisons = [item for item in (result.A, result.L) if item.status != "SKIPPED"]
     if not comparisons:
         return result
-    result.status = "FAIL" if any(item.status == "FAIL" for item in comparisons) else "PASS"
+    if any(item.status == "FAIL" for item in comparisons):
+        result.status = "FAIL"
+    elif any(item.status == "AVAILABLE" for item in comparisons):
+        result.status = "AVAILABLE"
+    else:
+        result.status = "PASS"
     return result

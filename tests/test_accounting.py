@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from ioaudit import AccountingConvention, IOSystem, audit
+from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
 
 
 def test_balanced_input_and_output(normal_io):
     report = audit(normal_io)
-    assert report.accounting.status == "AVAILABLE"
+    assert report.accounting.status == "PASS"
     assert report.accounting.max_relative_residual == 0
     assert report.accounting.input_balance.max_absolute_residual == 0
     assert report.accounting.output_balance.max_absolute_residual == 0
@@ -29,9 +29,23 @@ def test_multidimensional_y_and_v(normal_io):
     z, x = normal_io.Z, normal_io.x
     y = np.array([[2.0, 3.0], [2.0, 3.0]])
     v = np.array([[2.0, 2.0], [3.0, 3.0]])
-    report = audit(IOSystem(z, x, ["A", "B"], Y=y, V=v, imports=np.zeros(2), accounting=AccountingConvention.domestic_competitive(
-        inflow_sign="negative", trade_representation="outflows_in_Y", external_flow_scope="international",
-        outflow_sign="positive", input_representation="complete")))
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["A", "B"],
+            Y=y,
+            V=v,
+            trade=TradeFlows(international_imports=np.zeros(2)),
+            accounting=AccountingConvention.domestic_competitive(
+                inflow_sign="negative",
+                trade_representation="outflows_in_Y",
+                external_flow_scope="international",
+                outflow_sign="positive",
+                input_representation="complete",
+            ),
+        )
+    )
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.input_balance.max_absolute_residual == 0
 
@@ -49,14 +63,14 @@ def test_dataframe_input_adjustment_columns_must_match_sector_order(normal_io):
             normal_io.sectors,
             Y=normal_io.Y,
             V=normal_io.V,
-            input_adjustments_by_user=adjustment,
+            input_adjustments=adjustment,
             accounting=AccountingConvention.domestic_competitive(
                 input_representation="adjustments_required"
             ),
         )
     )
-    assert report.structure.input_adjustments_by_user_labels_match is False
-    assert report.structure.normalized_input_adjustments_by_user_labels_match is False
+    assert report.structure.input_adjustment_labels_match is False
+    assert report.structure.normalized_input_adjustment_labels_match is False
     assert report.accounting.input_balance.status == "SKIPPED"
     assert "columns do not match sectors in order" in report.accounting.input_balance.reason
 
@@ -74,14 +88,14 @@ def test_dataframe_input_adjustment_normalized_columns_are_used_with_warning(nor
             normal_io.sectors,
             Y=normal_io.Y,
             V=normal_io.V,
-            input_adjustments_by_user=adjustment,
+            input_adjustments=adjustment,
             accounting=AccountingConvention.domestic_competitive(
                 input_representation="adjustments_required"
             ),
         )
     )
-    assert report.structure.input_adjustments_by_user_labels_match is False
-    assert report.structure.normalized_input_adjustments_by_user_labels_match is True
+    assert report.structure.input_adjustment_labels_match is False
+    assert report.structure.normalized_input_adjustment_labels_match is True
     assert report.accounting.input_balance.status == "PASS"
     assert any("normalization" in note for note in report.accounting.notes)
 
@@ -102,7 +116,20 @@ def test_noncompetitive_import_accounting_uses_explicit_vectors():
         inflow_sign="positive",
         outflow_sign="positive",
     )
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, exports=exports, accounting=convention))
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=y,
+            V=v,
+            trade=TradeFlows(
+                international_imports=imports,
+                international_exports=exports,
+            ),
+            accounting=convention,
+        )
+    )
     assert report.accounting.import_adjustment_applied is True
     assert report.accounting.imports_used is True
     assert report.accounting.exports_used is True
@@ -117,9 +144,23 @@ def test_competitive_import_accounting_uses_signed_import_row():
     y = np.array([6.0, 7.0])
     v = np.array([5.0, 5.0])
     imports = np.array([-1.0, -2.0])
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=AccountingConvention.domestic_competitive(
-        inflow_sign="negative", trade_representation="outflows_in_Y", external_flow_scope="international",
-        outflow_sign="positive", input_representation="complete")))
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=y,
+            V=v,
+            trade=TradeFlows(international_imports=imports),
+            accounting=AccountingConvention.domestic_competitive(
+                inflow_sign="negative",
+                trade_representation="outflows_in_Y",
+                external_flow_scope="international",
+                outflow_sign="positive",
+                input_representation="complete",
+            ),
+        )
+    )
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.import_adjustment_applied is True
     assert report.accounting.imports_used is True
@@ -135,12 +176,22 @@ def test_competitive_positive_import_accounting_subtracts_magnitude():
     convention = AccountingConvention(
         transaction_scope="domestic",
         import_treatment="competitive",
-        import_sign="positive",
+        inflow_sign="positive",
         trade_representation="outflows_in_Y",
         external_flow_scope="international",
         outflow_sign="positive",
     )
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=convention))
+    report = audit(
+        IOSystem(
+            z,
+            x,
+            ["a", "b"],
+            Y=y,
+            V=v,
+            trade=TradeFlows(international_imports=imports),
+            accounting=convention,
+        )
+    )
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert " - imports " in report.accounting.formula
 
@@ -153,8 +204,8 @@ def test_competitive_unknown_import_sign_skips_output_balance():
             ["a", "b"],
             Y=np.ones(2),
             V=np.ones(2),
-            imports=np.ones(2),
-            accounting=AccountingConvention(import_sign="unknown"),
+            trade=TradeFlows(international_imports=np.ones(2)),
+            accounting=AccountingConvention(inflow_sign="unknown"),
         )
     )
     assert report.accounting.output_balance.status == "SKIPPED"
@@ -174,8 +225,10 @@ def test_explicit_generalized_unknown_inflow_sign_is_not_overridden():
             np.array([6.0]),
             ["a"],
             Y=np.array([6.0]),
-            imports=np.array([2.0]),
-            exports=np.array([0.0]),
+            trade=TradeFlows(
+                international_imports=np.array([2.0]),
+                international_exports=np.array([0.0]),
+            ),
             accounting=convention,
         )
     )
@@ -183,7 +236,7 @@ def test_explicit_generalized_unknown_inflow_sign_is_not_overridden():
     assert report.accounting.output_balance.status == "SKIPPED"
 
 
-def test_import_sign_is_not_applicable_for_total_scope():
+def test_inflow_sign_is_not_applicable_for_total_scope():
     report = audit(
         IOSystem(
             np.eye(1),
@@ -191,17 +244,15 @@ def test_import_sign_is_not_applicable_for_total_scope():
             ["a"],
             Y=np.array([1.0]),
             V=np.array([1.0]),
-            imports=np.array([10.0]),
             accounting=AccountingConvention(
                 "total",
                 "competitive",
-                "unknown",
                 trade_representation="embedded",
                 external_flow_scope="international",
             ),
         )
     )
-    assert "import_sign not applicable" in report.accounting.notes
+    assert "inflow_sign not applicable" in report.accounting.notes
 
 
 def test_unknown_trade_representation_skips_even_with_total_scope():
@@ -220,7 +271,18 @@ def test_unknown_trade_representation_skips_even_with_total_scope():
 
 
 def test_noncompetitive_without_import_vectors_skips_adjusted_side():
-    report = audit(IOSystem(np.eye(2), np.ones(2), ["a", "b"], Y=np.ones(2), V=np.ones(2), accounting=AccountingConvention("domestic", "noncompetitive", input_representation="complete")))
+    report = audit(
+        IOSystem(
+            np.eye(2),
+            np.ones(2),
+            ["a", "b"],
+            Y=np.ones(2),
+            V=np.ones(2),
+            accounting=AccountingConvention(
+                "domestic", "noncompetitive", input_representation="complete"
+            ),
+        )
+    )
     assert report.accounting.output_balance.status == "SKIPPED"
     assert report.accounting.input_balance.status == "AVAILABLE"
 
@@ -277,13 +339,13 @@ def test_input_adjustments_are_required_and_aggregated_by_user():
             ["a", "b"],
             Y=np.array([5.0, 5.0]),
             V=v,
-            external_inputs_by_user=external_inputs,
+            input_adjustments=external_inputs,
             accounting=convention,
         )
     )
     assert report.accounting.input_balance.status == "PASS"
     assert report.accounting.input_adjustment_applied is True
-    assert report.accounting.external_inputs_used is True
+    assert report.accounting.input_adjustments_used is True
     assert report.accounting.input_balance.equation.endswith("+ input_adjustment")
 
 
@@ -318,10 +380,9 @@ def test_two_input_adjustment_representations_are_not_added_together():
             ["a"],
             Y=np.array([2.0]),
             V=np.array([2.0]),
-            external_inputs_by_user=np.array([1.0]),
-            input_adjustments_by_user=np.array([1.0]),
+            input_adjustments=np.array([1.0]),
             accounting=convention,
         )
     )
     assert report.accounting.input_balance.status == "SKIPPED"
-    assert "supplied together" in report.accounting.input_balance.reason
+    assert "complete" in report.accounting.input_balance.reason
