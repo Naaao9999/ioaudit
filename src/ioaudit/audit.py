@@ -116,6 +116,13 @@ def audit(
         warnings.append("exact duplicate rows or columns were found in Z")
     if structure.duplicate_labels_after_normalization:
         warnings.append("duplicate labels remain after Unicode/whitespace normalization")
+    for field_name in ("external_inputs_by_user", "input_adjustments_by_user"):
+        exact = getattr(structure, f"{field_name}_labels_match", None)
+        normalized = getattr(structure, f"normalized_{field_name}_labels_match", None)
+        if exact is False and normalized is True:
+            warnings.append(
+                f"{field_name} labels match sectors only after Unicode/whitespace normalization"
+            )
     if zero_output.all_zero_rows_with_positive_output or zero_output.all_zero_columns_with_positive_output:
         warnings.append("Z contains all-zero rows or columns with positive output")
     if zero_output.all_zero_rows_with_positive_final_demand:
@@ -130,6 +137,11 @@ def audit(
         warnings.append(stability.reason)
     if structure.status == "FAIL":
         errors.append("structural validation failed; dependent calculations may be SKIPPED")
+    if getattr(structure, "auxiliary_status", None) == "FAIL":
+        warnings.append(
+            "auxiliary data validation reported issues; inspect "
+            "report.structure.auxiliary_*"
+        )
 
     return AuditReport(
         structure=structure,

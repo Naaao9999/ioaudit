@@ -11,7 +11,13 @@ def normal_data():
     sectors = ["A", "B"]
     y = np.array([[5.0], [5.0]])
     v = np.array([[5.0, 5.0]])
-    convention = AccountingConvention.domestic_competitive()
+    convention = AccountingConvention.domestic_competitive(
+        inflow_sign="negative",
+        trade_representation="outflows_in_Y",
+        external_flow_scope="international",
+        outflow_sign="positive",
+        input_representation="complete",
+    )
     return z, x, sectors, y, v, convention
 
 

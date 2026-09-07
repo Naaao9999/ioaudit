@@ -79,11 +79,12 @@ class CSVInspectionReport:
     internal_blank_lines: list[int] = field(default_factory=list)
     trailing_blank_lines: list[int] = field(default_factory=list)
     completely_blank_rows: list[int] = field(default_factory=list)
-    inconsistent_column_count: list[dict[str, int]] = field(default_factory=list)
+    inconsistent_column_count: list[dict[str, Any]] = field(default_factory=list)
     expected_column_count: int | None = None
     header_line: int | None = None
     preamble_rows: list[int] = field(default_factory=list)
     header_continuation_rows: list[int] = field(default_factory=list)
+    possible_truncated_rows: list[dict[str, Any]] = field(default_factory=list)
     trailing_delimiter: list[int] = field(default_factory=list)
     duplicate_headers: list[str] = field(default_factory=list)
     empty_headers: list[int] = field(default_factory=list)
@@ -262,19 +263,18 @@ def _status(report: CSVInspectionReport) -> str:
     return "FAIL" if critical else ("WARNING" if warning else "PASS")
 
 
-def _dominant_width(data_rows: Sequence[tuple[int, list[str]]]) -> int:
-    """Return the most representative width for a nonblank CSV body.
+def _header_position(data_rows: Sequence[tuple[int, list[str]]]) -> int:
+    """Return the first rectangular-row candidate after optional preamble.
 
-    Title and note rows are often one-column rows in otherwise rectangular
-    files.  Prefer the most frequent multi-column width when one exists, and
-    fall back to the first nonblank row for genuinely one-column files.
+    A file may begin with one-column title or source rows.  Once a real
+    multi-column row appears, its width is retained as the header width even
+    if malformed later rows happen to be more frequent.
     """
 
-    widths = Counter(len(row) for _, row in data_rows)
-    multi_column = [(width, count) for width, count in widths.items() if width > 1]
-    if multi_column:
-        return max(multi_column, key=lambda item: (item[1], item[0]))[0]
-    return len(data_rows[0][1])
+    return next(
+        (index for index, (_, row) in enumerate(data_rows) if len(row) > 1),
+        0,
+    )
 
 
 def _looks_like_header_continuation(row: Sequence[str], width: int) -> bool:
@@ -293,6 +293,18 @@ def _looks_like_header_continuation(row: Sequence[str], width: int) -> bool:
         ):
             text_tokens += 1
     return text_tokens >= max(2, int(0.75 * (width - 1)))
+
+
+def _looks_like_metadata_row(text: str) -> bool:
+    """Recognize common one-field note and metadata rows."""
+
+    return bool(
+        re.match(
+            r"^(?:単位|注|備考|出典|note|unit|source|legend|footnotes)(?:\b|[.:：/）)])",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def inspect_csv(
@@ -385,13 +397,9 @@ def inspect_csv(
         report.status = "SKIPPED"
         report.notes.append("No nonblank CSV rows were found")
         return report
-    report.expected_column_count = _dominant_width(data_rows)
-    header_position = next(
-        index
-        for index, (_, row) in enumerate(data_rows)
-        if len(row) == report.expected_column_count
-    )
+    header_position = _header_position(data_rows)
     header_line, header = data_rows[header_position]
+    report.expected_column_count = len(header)
     report.header_line = header_line
     report.preamble_rows = [
         line_number
@@ -416,6 +424,7 @@ def inspect_csv(
     report.duplicate_headers = sorted(name for name, count in counts.items() if name and count > 1)
 
     all_rows_for_columns = [row for _, row in rows]
+    body_row_seen = False
     for line_number, row in data_rows:
         if line_number < header_line:
             # A title or source row before the first rectangular row is file
@@ -424,22 +433,41 @@ def inspect_csv(
         if len(row) != report.expected_column_count:
             if len(row) == 1:
                 text = row[0].strip()
-                if text:
+                if text and _looks_like_metadata_row(text):
                     report.unexpected_text_rows.append({"line": line_number, "text": text})
+                elif text:
+                    truncated = {
+                        "line": line_number,
+                        "expected": report.expected_column_count,
+                        "actual": len(row),
+                        "reason": "possible_truncated_record",
+                    }
+                    report.inconsistent_column_count.append(truncated)
+                    report.possible_truncated_rows.append(truncated.copy())
+                    body_row_seen = True
+                else:
+                    body_row_seen = True
                 continue
             report.inconsistent_column_count.append(
                 {"line": line_number, "expected": report.expected_column_count, "actual": len(row)}
             )
+            body_row_seen = True
         if (
             len(row) == report.expected_column_count
             and [cell.strip() for cell in row] == normalized_headers
             and line_number != header_line
         ):
             report.repeated_header_rows.append(line_number)
-        if len(row) == report.expected_column_count and _looks_like_header_continuation(
-            row, report.expected_column_count
+            body_row_seen = True
+        if (
+            len(row) == report.expected_column_count
+            and not body_row_seen
+            and _looks_like_header_continuation(row, report.expected_column_count)
         ):
             report.header_continuation_rows.append(line_number)
+            continue
+        if len(row) == report.expected_column_count and line_number != header_line:
+            body_row_seen = True
         for index, token in enumerate(row):
             if token != token.strip():
                 report.whitespace.append(

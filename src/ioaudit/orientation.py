@@ -111,7 +111,7 @@ def _score(
     input_residual = None
     if v is not None:
         input_representation = convention.input_representation
-        adjustment, _, adjustment_source = _resolve_input_adjustment(
+        adjustment, _, adjustment_source, _ = _resolve_input_adjustment(
             io, n=z.shape[0]
         )
         if input_representation == "complete" and adjustment_source is None:

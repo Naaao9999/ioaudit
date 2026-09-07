@@ -68,19 +68,40 @@ def test_plain_convention_is_conservative_and_structural_presets_are_explicit():
     competitive = AccountingConvention.domestic_competitive()
     assert competitive.transaction_scope == "domestic"
     assert competitive.import_treatment == "competitive"
-    assert competitive.trade_representation == "outflows_in_Y"
-    assert competitive.external_flow_scope == "international"
-    assert competitive.inflow_sign == "negative"
-    assert competitive.outflow_sign == "positive"
-    assert competitive.input_representation == "complete"
+    assert competitive.trade_representation == "unknown"
+    assert competitive.external_flow_scope == "unknown"
+    assert competitive.inflow_sign == "unknown"
+    assert competitive.outflow_sign == "unknown"
+    assert competitive.input_representation == "unknown"
 
     noncompetitive = AccountingConvention.domestic_noncompetitive()
     assert noncompetitive.transaction_scope == "domestic"
     assert noncompetitive.import_treatment == "noncompetitive"
-    assert noncompetitive.trade_representation == "separate"
-    assert noncompetitive.inflow_sign == "positive"
+    assert noncompetitive.trade_representation == "unknown"
+    assert noncompetitive.external_flow_scope == "unknown"
+    assert noncompetitive.inflow_sign == "unknown"
+    assert noncompetitive.outflow_sign == "unknown"
+    assert noncompetitive.input_representation == "unknown"
 
     total = AccountingConvention.total_transactions()
     assert total.transaction_scope == "total"
     assert total.import_treatment == "none"
     assert total.trade_representation == "embedded"
+
+
+def test_structural_preset_without_semantic_fields_skips_affected_accounting():
+    from ioaudit import audit
+
+    report = audit(
+        IOSystem(
+            np.array([[0.1]]),
+            np.array([1.0]),
+            ["A"],
+            Y=np.array([0.9]),
+            V=np.array([0.9]),
+            imports=np.array([0.0]),
+            accounting=AccountingConvention.domestic_competitive(),
+        )
+    )
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert report.accounting.input_balance.status == "SKIPPED"

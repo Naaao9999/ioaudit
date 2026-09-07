@@ -106,18 +106,19 @@ class AccountingConvention:
     def domestic_competitive(
         cls,
         *,
-        inflow_sign: str = "negative",
-        trade_representation: str = "outflows_in_Y",
-        external_flow_scope: str = "international",
-        outflow_sign: str = "positive",
-        input_representation: str = "complete",
+        inflow_sign: str = "unknown",
+        trade_representation: str = "unknown",
+        external_flow_scope: str = "unknown",
+        outflow_sign: str = "unknown",
+        input_representation: str = "unknown",
     ) -> "AccountingConvention":
-        """Return an explicit domestic competitive-import convention.
+        """Return a domestic competitive-import convention.
 
-        The preset describes an accounting structure, not a country or data
-        provider.  Its defaults are common for tables where outflows are
-        already included in ``Y`` and inflows are stored as signed negative
-        values; callers can override the signs and flow representation.
+        The preset fixes only the semantics guaranteed by its name:
+        ``transaction_scope="domestic"`` and
+        ``import_treatment="competitive"``.  Trade representation, signs,
+        and input completeness remain ``"unknown"`` unless explicitly
+        declared by the caller.
         """
 
         return cls(
@@ -134,13 +135,18 @@ class AccountingConvention:
     def domestic_noncompetitive(
         cls,
         *,
-        trade_representation: str = "separate",
-        external_flow_scope: str = "international",
-        inflow_sign: str = "positive",
-        outflow_sign: str = "positive",
-        input_representation: str = "complete",
+        trade_representation: str = "unknown",
+        external_flow_scope: str = "unknown",
+        inflow_sign: str = "unknown",
+        outflow_sign: str = "unknown",
+        input_representation: str = "unknown",
     ) -> "AccountingConvention":
-        """Return an explicit domestic noncompetitive-import convention."""
+        """Return a domestic noncompetitive-import convention.
+
+        Only the domestic transaction scope and noncompetitive import
+        treatment are fixed by this preset.  All other semantic fields must
+        be declared when they are known from the source table.
+        """
 
         return cls(
             transaction_scope="domestic",

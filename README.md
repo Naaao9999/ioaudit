@@ -189,6 +189,9 @@ accounting = AccountingConvention()
 accounting = AccountingConvention.domestic_competitive(
     inflow_sign="negative",
     trade_representation="outflows_in_Y",
+    external_flow_scope="international",
+    outflow_sign="positive",
+    input_representation="complete",
 )
 ```
 
@@ -200,6 +203,7 @@ AccountingConvention.total_transactions()
 ```
 
 があります。これらは国名ではなく、会計構造を表すpresetです。
+`domestic_competitive()` と `domestic_noncompetitive()` は、それぞれ取引範囲と輸入処理だけを固定します。交易の格納方法、符号、投入側の完全性は推測せず、必要に応じて明示してください。
 
 すべて明示することもできます。
 
@@ -657,6 +661,9 @@ Explicit presets are available for common accounting structures:
 accounting = AccountingConvention.domestic_competitive(
     inflow_sign="negative",
     trade_representation="outflows_in_Y",
+    external_flow_scope="international",
+    outflow_sign="positive",
+    input_representation="complete",
 )
 ```
 
@@ -668,6 +675,7 @@ AccountingConvention.total_transactions()
 ```
 
 These presets describe accounting structures, not countries.
+`domestic_competitive()` and `domestic_noncompetitive()` fix only the transaction scope and import treatment implied by their names. Trade representation, signs, and input completeness remain unknown unless explicitly declared.
 
 A convention can also be declared fully explicitly:
 
@@ -724,6 +732,8 @@ io = IOSystem(
 ```
 
 `external_inputs_by_user` と `input_adjustments_by_user` は代替表現です。同時指定は二重計上の可能性があるため、投入側会計を `SKIPPED` にします。`input_representation="unknown"`（`AccountingConvention()` の既定値）では、Vが完全な付加価値か外部調整を要するかを推測しません。
+
+2次元の外部投入調整では、DataFrameの列が購入部門を表します。列ラベルが `sectors` と順序まで一致しない場合、位置ベースの加算を行わず投入側会計を `SKIPPED` にします。Unicode・空白の正規化後だけ一致する場合は、宣言された順序で使用し、WARNINGを記録します。
 
 If `V` contains only domestic value-added items and user-specific external input adjustments are required, declare `input_representation="adjustments_required"`. The signed adjustment can have shape `(n,)` or `(m, n)`; the latter is summed over input rows. `external_inputs_by_user` and `input_adjustments_by_user` are alternative representations. Supplying both skips the input balance to avoid ambiguous double counting. `input_representation="unknown"` never infers whether `V` is complete.
 
@@ -951,11 +961,11 @@ File-level diagnostics can report issues such as:
 - repeated headers within the file
 
 `ioaudit` does not automatically infer which regions of a file correspond to `Z`, `x`, `Y`, or `V`, and it does not remove footnotes or total rows automatically.
-タイトル・出典などの前文がある場合は、`header_line`、`preamble_rows`、`header_continuation_rows` として位置を報告します。表の行ラベル用に先頭列のヘッダーが空欄の場合は `leading_empty_headers` に記録します。これらは診断情報であり、行列範囲の自動確定や行の削除は行いません。
+タイトル・出典などの前文がある場合は、`header_line`、`preamble_rows`、`header_continuation_rows` として位置を報告します。表の行ラベル用に先頭列のヘッダーが空欄の場合は `leading_empty_headers` に記録します。表本体で期待列数に満たない1列行は、既知の注記でなければ `possible_truncated_rows` と列数不一致に記録します。これらは診断情報であり、行列範囲の自動確定や行の削除は行いません。
 
 The file-level diagnostic reports encoding/BOM, delimiter, blank rows, inconsistent column counts, duplicate or empty headers, trailing delimiters, quoting anomalies, whitespace, non-numeric tokens, NaN/Inf-like tokens, possible unquoted thousands separators, note rows, and repeated headers.
 
-For files with title or source preambles, `header_line`, `preamble_rows`, and `header_continuation_rows` report their locations. A blank leading stub header is recorded in `leading_empty_headers`. These are diagnostics only; no table range is auto-selected and no rows are deleted.
+For files with title or source preambles, `header_line`, `preamble_rows`, and `header_continuation_rows` report their locations. A blank leading stub header is recorded in `leading_empty_headers`. A one-field row inside the body is recorded in `possible_truncated_rows` and as a column-count anomaly unless it matches a recognized note or metadata row. These are diagnostics only; no table range is auto-selected and no rows are deleted.
 
 桁区切りの変換、行列範囲の推測、脚注や合計行の削除、Z・x・Y・Vの自動抽出は行いません。
 

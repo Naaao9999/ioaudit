@@ -102,3 +102,53 @@ def test_preamble_and_descriptive_header_do_not_create_false_width_failures(tmp_
     assert result.inconsistent_column_count == []
     assert result.numeric_columns["11"]["numeric_percentage"] == 100.0
     assert result.status == "WARNING"
+
+
+def test_first_header_width_is_preserved_when_later_rows_are_wider(tmp_path: Path):
+    path = tmp_path / "unquoted_thousands.csv"
+    path.write_text(
+        "A,B\n"
+        "1,234,5,678\n"
+        "2,345,6,789\n",
+        encoding="utf-8",
+    )
+    result = inspect_csv(path)
+    assert result.header_line == 1
+    assert result.expected_column_count == 2
+    assert [item["line"] for item in result.inconsistent_column_count] == [2, 3]
+    assert result.possible_unquoted_thousands_separator is True
+    assert result.status == "FAIL"
+
+
+def test_single_field_data_row_is_flagged_as_possible_truncation(tmp_path: Path):
+    path = tmp_path / "truncated.csv"
+    path.write_text(
+        "A,B\n"
+        "1,2\n"
+        "999\n"
+        "3,4\n",
+        encoding="utf-8",
+    )
+    result = inspect_csv(path)
+    assert result.possible_truncated_rows == [
+        {"line": 3, "expected": 2, "actual": 1, "reason": "possible_truncated_record"}
+    ]
+    assert result.unexpected_text_rows == []
+    assert result.status == "FAIL"
+
+
+def test_header_continuation_only_applies_before_first_body_row(tmp_path: Path):
+    path = tmp_path / "bad_body.csv"
+    path.write_text(
+        "id,A,B\n"
+        "a,1,2\n"
+        ",broken,error\n"
+        "b,3,4\n",
+        encoding="utf-8",
+    )
+    result = inspect_csv(path)
+    assert result.header_continuation_rows == []
+    assert result.non_numeric_tokens["broken"] == 1
+    assert result.non_numeric_tokens["error"] == 1
+    assert result.numeric_columns["A"]["numeric_percentage"] == 66.667
+    assert result.status == "WARNING"

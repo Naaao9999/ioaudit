@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from ioaudit import AccountingConvention, IOSystem, audit
 
@@ -28,9 +29,61 @@ def test_multidimensional_y_and_v(normal_io):
     z, x = normal_io.Z, normal_io.x
     y = np.array([[2.0, 3.0], [2.0, 3.0]])
     v = np.array([[2.0, 2.0], [3.0, 3.0]])
-    report = audit(IOSystem(z, x, ["A", "B"], Y=y, V=v, imports=np.zeros(2), accounting=AccountingConvention.domestic_competitive()))
+    report = audit(IOSystem(z, x, ["A", "B"], Y=y, V=v, imports=np.zeros(2), accounting=AccountingConvention.domestic_competitive(
+        inflow_sign="negative", trade_representation="outflows_in_Y", external_flow_scope="international",
+        outflow_sign="positive", input_representation="complete")))
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.input_balance.max_absolute_residual == 0
+
+
+def test_dataframe_input_adjustment_columns_must_match_sector_order(normal_io):
+    adjustment = pd.DataFrame(
+        [[1.0, 3.0], [0.0, 0.0]],
+        index=["external", "tax"],
+        columns=["B", "A"],
+    )
+    report = audit(
+        IOSystem(
+            normal_io.Z,
+            normal_io.x,
+            normal_io.sectors,
+            Y=normal_io.Y,
+            V=normal_io.V,
+            input_adjustments_by_user=adjustment,
+            accounting=AccountingConvention.domestic_competitive(
+                input_representation="adjustments_required"
+            ),
+        )
+    )
+    assert report.structure.input_adjustments_by_user_labels_match is False
+    assert report.structure.normalized_input_adjustments_by_user_labels_match is False
+    assert report.accounting.input_balance.status == "SKIPPED"
+    assert "columns do not match sectors in order" in report.accounting.input_balance.reason
+
+
+def test_dataframe_input_adjustment_normalized_columns_are_used_with_warning(normal_io):
+    adjustment = pd.DataFrame(
+        [[0.0, 0.0], [0.0, 0.0]],
+        index=["external", "tax"],
+        columns=["A ", "B"],
+    )
+    report = audit(
+        IOSystem(
+            normal_io.Z,
+            normal_io.x,
+            normal_io.sectors,
+            Y=normal_io.Y,
+            V=normal_io.V,
+            input_adjustments_by_user=adjustment,
+            accounting=AccountingConvention.domestic_competitive(
+                input_representation="adjustments_required"
+            ),
+        )
+    )
+    assert report.structure.input_adjustments_by_user_labels_match is False
+    assert report.structure.normalized_input_adjustments_by_user_labels_match is True
+    assert report.accounting.input_balance.status == "PASS"
+    assert any("normalization" in note for note in report.accounting.notes)
 
 
 def test_noncompetitive_import_accounting_uses_explicit_vectors():
@@ -64,7 +117,9 @@ def test_competitive_import_accounting_uses_signed_import_row():
     y = np.array([6.0, 7.0])
     v = np.array([5.0, 5.0])
     imports = np.array([-1.0, -2.0])
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=AccountingConvention.domestic_competitive()))
+    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=AccountingConvention.domestic_competitive(
+        inflow_sign="negative", trade_representation="outflows_in_Y", external_flow_scope="international",
+        outflow_sign="positive", input_representation="complete")))
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.import_adjustment_applied is True
     assert report.accounting.imports_used is True
