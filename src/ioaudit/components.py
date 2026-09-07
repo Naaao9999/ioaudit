@@ -146,7 +146,11 @@ def _best_subset(
     candidate = array[candidate_index, :] if axis == 0 else array[:, candidate_index]
     if not np.any(candidate != 0):
         return None
-    other_indices = [index for index in range(size) if index != candidate_index]
+    nonzero = np.any(array != 0, axis=1 - axis)
+    other_indices = [
+        index for index in range(size)
+        if index != candidate_index and nonzero[index]
+    ]
     best: tuple[tuple[int, ...], float] | None = None
     for subset_size in range(2, len(other_indices) + 1):
         for subset in combinations(other_indices, subset_size):
@@ -176,6 +180,7 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
     if len(shape) != 2 or not _all_finite(value):
         return []
     size = shape[axis]
+    nonzero = np.any(array != 0, axis=1 - axis)
     labels = _labels(value, axis)
     with np.errstate(over="ignore", invalid="ignore"):
         total = array.sum(axis=axis)
@@ -192,7 +197,7 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
         # only when there are at least three components.  A declared subtotal
         # label remains useful at any component count.
         sum_evidence = (
-            size >= 3
+            np.count_nonzero(nonzero) - int(nonzero[index]) >= 2
             and similarity >= 0.999
             and bool(np.any(candidate != 0))
         )
