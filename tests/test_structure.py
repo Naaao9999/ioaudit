@@ -28,6 +28,37 @@ def test_nan_inf_and_nonnumeric():
     assert text_report.structure.non_numeric is True
 
 
+def test_invalid_employment_does_not_fail_core_structure():
+    report = audit(
+        IOSystem(
+            np.eye(2) * 0.1,
+            np.ones(2),
+            ["a", "b"],
+            employment=["bad", None],
+        )
+    )
+    assert report.structure.status == "PASS"
+    assert report.structure.auxiliary_status == "FAIL"
+    assert report.structure.auxiliary_non_numeric_fields == ["employment"]
+    assert any("auxiliary data" in warning for warning in report.warnings)
+    assert report.passed() is True
+
+
+def test_invalid_satellites_do_not_fail_core_structure():
+    report = audit(
+        IOSystem(
+            np.eye(2) * 0.1,
+            np.ones(2),
+            ["a", "b"],
+            satellites=np.array([[1.0, np.nan]]),
+        )
+    )
+    assert report.structure.status == "PASS"
+    assert report.structure.auxiliary_status == "FAIL"
+    assert report.structure.auxiliary_nan_fields == ["satellites"]
+    assert report.passed() is True
+
+
 def test_duplicate_sector_ids():
     report = audit(IOSystem(np.eye(2), np.ones(2), ["a", "a"]))
     assert report.structure.duplicate_sector_ids is True

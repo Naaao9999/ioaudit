@@ -9,7 +9,15 @@ import numpy as np
 
 from .conventions import AccountingConvention
 from .exceptions import IOValidationError
-from .structure import _all_finite, _is_sparse, _numeric_array, _shape_of
+from .structure import (
+    _all_finite,
+    _is_sparse,
+    _labels,
+    _numeric_array,
+    _same_labels,
+    _same_normalized_labels,
+    _shape_of,
+)
 
 
 def _axis_sum(value: Any, axis: int) -> np.ndarray:
@@ -119,8 +127,8 @@ def _aggregate_sector_vector(value: Any, *, name: str, n: int) -> tuple[np.ndarr
 
 
 def _input_adjustment_vector(
-    value: Any, *, name: str, n: int
-) -> tuple[np.ndarray | None, str | None]:
+    value: Any, *, name: str, n: int, sectors: list[Any]
+) -> tuple[np.ndarray | None, str | None, str | None]:
     """Read signed user-specific input adjustments without guessing an axis.
 
     A one-dimensional value is already aggregated by user sector.  A
@@ -130,24 +138,54 @@ def _input_adjustment_vector(
     """
 
     if value is None:
-        return None, f"{name} was not supplied"
+        return None, f"{name} was not supplied", None
     try:
         array, bad = _numeric_array(value)
     except Exception as exc:
-        return None, f"{name} could not be read: {exc}"
+        return None, f"{name} could not be read: {exc}", None
     if array is None or bad or not _all_finite(array):
-        return None, f"{name} contains non-numeric or missing values"
+        return None, f"{name} contains non-numeric or missing values", None
+
+    labels_index, labels_columns = _labels(value)
     shape = _shape_of(array)
     if len(shape) == 1 and shape == (n,):
-        return np.asarray(array, dtype=float), None
+        alignment_labels = labels_index
+    elif len(shape) == 2 and shape[1] == n:
+        alignment_labels = labels_columns
+    else:
+        return None, f"{name} must have shape (n,) or (m, n)", None
+
+    if alignment_labels is not None:
+        exact = _same_labels(alignment_labels, sectors)
+        normalized = _same_normalized_labels(alignment_labels, sectors)
+        if exact is False and normalized is not True:
+            axis = "columns" if len(shape) == 2 else "index"
+            return (
+                None,
+                f"{name} {axis} do not match sectors in order; positional use was skipped",
+                None,
+            )
+        if exact is False and normalized is True:
+            axis = "columns" if len(shape) == 2 else "index"
+            alignment_note = (
+                f"{name} {axis} match sectors only after Unicode/whitespace normalization; "
+                "values were used in the declared order"
+            )
+        else:
+            alignment_note = None
+    else:
+        alignment_note = None
+
+    if len(shape) == 1 and shape == (n,):
+        return np.asarray(array, dtype=float), None, alignment_note
     if len(shape) == 2 and shape[1] == n:
-        return _axis_sum(array, 0), None
-    return None, f"{name} must have shape (n,) or (m, n)"
+        return _axis_sum(array, 0), None, alignment_note
+    return None, f"{name} must have shape (n,) or (m, n)", None
 
 
 def _resolve_input_adjustment(
     io: Any, *, n: int
-) -> tuple[np.ndarray | None, str | None, str | None]:
+) -> tuple[np.ndarray | None, str | None, str | None, str | None]:
     """Resolve one explicit input-side adjustment source.
 
     The two public fields are alternative representations.  Supplying both
@@ -158,18 +196,29 @@ def _resolve_input_adjustment(
     external = getattr(io, "external_inputs_by_user", None)
     adjustments = getattr(io, "input_adjustments_by_user", None)
     if external is not None and adjustments is not None:
-        return None, "external_inputs_by_user and input_adjustments_by_user were supplied together", "conflict"
+        return (
+            None,
+            "external_inputs_by_user and input_adjustments_by_user were supplied together",
+            "conflict",
+            None,
+        )
     if adjustments is not None:
-        vector, reason = _input_adjustment_vector(
-            adjustments, name="input_adjustments_by_user", n=n
+        vector, reason, alignment_note = _input_adjustment_vector(
+            adjustments,
+            name="input_adjustments_by_user",
+            n=n,
+            sectors=list(io.sectors),
         )
-        return vector, reason, "input_adjustments_by_user"
+        return vector, reason, "input_adjustments_by_user", alignment_note
     if external is not None:
-        vector, reason = _input_adjustment_vector(
-            external, name="external_inputs_by_user", n=n
+        vector, reason, alignment_note = _input_adjustment_vector(
+            external,
+            name="external_inputs_by_user",
+            n=n,
+            sectors=list(io.sectors),
         )
-        return vector, reason, "external_inputs_by_user"
-    return None, "no input-side adjustment was supplied", None
+        return vector, reason, "external_inputs_by_user", alignment_note
+    return None, "no input-side adjustment was supplied", None, None
 
 
 def _balance(
@@ -498,7 +547,12 @@ def diagnose_accounting(
             output_residual, x, output_equation, result.tolerance
         )
 
-    input_adjustment, input_adjustment_reason, input_adjustment_source = (
+    (
+        input_adjustment,
+        input_adjustment_reason,
+        input_adjustment_source,
+        input_adjustment_alignment_note,
+    ) = (
         _resolve_input_adjustment(io, n=n)
     )
     input_equation = "input: SKIPPED"
@@ -558,6 +612,8 @@ def diagnose_accounting(
 
     if input_adjustment_reason and input_adjustment_source is not None:
         result.notes.append(input_adjustment_reason)
+    if input_adjustment_alignment_note:
+        result.notes.append(input_adjustment_alignment_note)
     if input_adjustment_source is not None and input_adjustment is None:
         result.input_balance.reason = input_adjustment_reason
     if "input:" in result.formula:
