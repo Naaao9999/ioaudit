@@ -96,21 +96,62 @@ class AccountingConvention:
         return f"{self.transaction_scope}/{self.import_treatment}"
 
     @classmethod
-    def japan_competitive(cls) -> "AccountingConvention":
-        """Return an explicit convention for a common Japanese IO format.
+    def domestic_competitive(
+        cls,
+        *,
+        inflow_sign: str = "negative",
+        trade_representation: str = "outflows_in_Y",
+        external_flow_scope: str = "international",
+        outflow_sign: str = "positive",
+    ) -> "AccountingConvention":
+        """Return an explicit domestic competitive-import convention.
 
-        This preset is opt-in.  It represents a domestic table with
-        competitive imports, outflows embedded in ``Y``, international
-        external flows, signed negative inflows, and positive outflows.
+        The preset describes an accounting structure, not a country or data
+        provider.  Its defaults are common for tables where outflows are
+        already included in ``Y`` and inflows are stored as signed negative
+        values; callers can override the signs and flow representation.
         """
 
         return cls(
             transaction_scope="domestic",
             import_treatment="competitive",
-            trade_representation="outflows_in_Y",
-            external_flow_scope="international",
-            inflow_sign="negative",
-            outflow_sign="positive",
+            trade_representation=trade_representation,
+            external_flow_scope=external_flow_scope,
+            inflow_sign=inflow_sign,
+            outflow_sign=outflow_sign,
+        )
+
+    @classmethod
+    def domestic_noncompetitive(
+        cls,
+        *,
+        trade_representation: str = "separate",
+        external_flow_scope: str = "international",
+        inflow_sign: str = "positive",
+        outflow_sign: str = "positive",
+    ) -> "AccountingConvention":
+        """Return an explicit domestic noncompetitive-import convention."""
+
+        return cls(
+            transaction_scope="domestic",
+            import_treatment="noncompetitive",
+            trade_representation=trade_representation,
+            external_flow_scope=external_flow_scope,
+            inflow_sign=inflow_sign,
+            outflow_sign=outflow_sign,
+        )
+
+    @classmethod
+    def total_transactions(cls) -> "AccountingConvention":
+        """Return an explicit convention for a total-transactions table."""
+
+        return cls(
+            transaction_scope="total",
+            import_treatment="none",
+            trade_representation="embedded",
+            external_flow_scope="unknown",
+            inflow_sign="unknown",
+            outflow_sign="unknown",
         )
 
     def to_dict(self) -> dict[str, str]:

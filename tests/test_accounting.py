@@ -28,7 +28,7 @@ def test_multidimensional_y_and_v(normal_io):
     z, x = normal_io.Z, normal_io.x
     y = np.array([[2.0, 3.0], [2.0, 3.0]])
     v = np.array([[2.0, 2.0], [3.0, 3.0]])
-    report = audit(IOSystem(z, x, ["A", "B"], Y=y, V=v, imports=np.zeros(2), accounting=AccountingConvention.japan_competitive()))
+    report = audit(IOSystem(z, x, ["A", "B"], Y=y, V=v, imports=np.zeros(2), accounting=AccountingConvention.domestic_competitive()))
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.input_balance.max_absolute_residual == 0
 
@@ -64,7 +64,7 @@ def test_competitive_import_accounting_uses_signed_import_row():
     y = np.array([6.0, 7.0])
     v = np.array([5.0, 5.0])
     imports = np.array([-1.0, -2.0])
-    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=AccountingConvention.japan_competitive()))
+    report = audit(IOSystem(z, x, ["a", "b"], Y=y, V=v, imports=imports, accounting=AccountingConvention.domestic_competitive()))
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.import_adjustment_applied is True
     assert report.accounting.imports_used is True

@@ -12,7 +12,7 @@ def _io_with_output_residual(residual):
         Y=np.array([5.0 + residual, 5.0]),
         V=np.array([5.0, 5.0]),
         imports=np.zeros(2),
-        accounting=AccountingConvention.japan_competitive(),
+        accounting=AccountingConvention.domestic_competitive(),
     )
 
 

@@ -64,10 +64,21 @@ def test_plain_convention_is_conservative_and_japan_preset_is_explicit():
     assert plain.inflow_sign == "unknown"
     assert plain.outflow_sign == "unknown"
 
-    japan = AccountingConvention.japan_competitive()
-    assert japan.transaction_scope == "domestic"
-    assert japan.import_treatment == "competitive"
-    assert japan.trade_representation == "outflows_in_Y"
-    assert japan.external_flow_scope == "international"
-    assert japan.inflow_sign == "negative"
-    assert japan.outflow_sign == "positive"
+    competitive = AccountingConvention.domestic_competitive()
+    assert competitive.transaction_scope == "domestic"
+    assert competitive.import_treatment == "competitive"
+    assert competitive.trade_representation == "outflows_in_Y"
+    assert competitive.external_flow_scope == "international"
+    assert competitive.inflow_sign == "negative"
+    assert competitive.outflow_sign == "positive"
+
+    noncompetitive = AccountingConvention.domestic_noncompetitive()
+    assert noncompetitive.transaction_scope == "domestic"
+    assert noncompetitive.import_treatment == "noncompetitive"
+    assert noncompetitive.trade_representation == "separate"
+    assert noncompetitive.inflow_sign == "positive"
+
+    total = AccountingConvention.total_transactions()
+    assert total.transaction_scope == "total"
+    assert total.import_treatment == "none"
+    assert total.trade_representation == "embedded"

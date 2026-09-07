@@ -83,13 +83,16 @@ Import treatment is declared through `AccountingConvention`; the presence of an 
 
 `AccountingConvention()` is intentionally conservative. Its semantic fields default to `"unknown"`, so affected accounting checks are `SKIPPED` instead of relying on an implicit table format.
 
-日本の典型的な表形式を明示的に使う場合は、次のopt-inプリセットを利用できます。
+会計構造を明示する場合は、構造名を持つopt-inプリセットを利用できます。
 
 ```python
-accounting = AccountingConvention.japan_competitive()
+accounting = AccountingConvention.domestic_competitive(
+    inflow_sign="negative",
+    trade_representation="outflows_in_Y",
+)
 ```
 
-For the common Japanese format, use the explicit opt-in preset `AccountingConvention.japan_competitive()`. It expands to a domestic table with competitive imports, outflows in `Y`, international flows, negative signed inflows, and positive outflows.
+Use `AccountingConvention.domestic_competitive()` for a domestic table with competitive imports. Use `AccountingConvention.domestic_noncompetitive()` for a domestic table with noncompetitive imports, and `AccountingConvention.total_transactions()` for a total-transactions table. These presets describe accounting structures rather than countries. For example, a table with negative competitive-import entries can use the same `domestic_competitive()` preset regardless of its country of origin.
 
 数値計算のアルゴリズム上の既定値（`numerical_method="auto"`、scale候補 `10**(-6..6)` のうち1を除く、最小改善率 `0.5`、全体適用範囲 `0.75`、反対側悪化許容 `0.10`）は設定されています。一方、単位・丸め幅・交易の意味に関する既定値は設定されません。
 
