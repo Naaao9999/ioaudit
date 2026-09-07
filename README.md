@@ -15,6 +15,20 @@
 
 問題が見つかっても、`ioaudit` は表を勝手に転置・補正・削除・再スケールしません。診断に必要な情報が不足している場合も、値や会計規約を推測せず `SKIPPED` として扱います。
 
+## できること
+
+`ioaudit` は、次のような「分析に渡す前の確認」を一つの `audit()` で実行します。
+
+- `Z`、`x`、`Y`、`V`、部門ラベルの shape・型・順序を検査
+- 転置の可能性、合計行・列、非部門項目、重複ラベルを検出
+- 宣言された会計規約に基づき、投入側・産出側の残差を計算
+- `Y` / `V` のsubtotal二重計上、交易表現、投入側調整の不足を診断
+- 技術係数 `A`、Leontief逆行列、スペクトラル半径、条件数を確認
+- `A_reference` / `L_reference` と比較し、桁・単位ミスの候補を報告
+- 結果を人間向けsummary、JSON、DataFrame、CI gateとして利用
+
+CSV等のファイル形式は `inspect_csv()` で別途確認できます。ファイルから表の範囲や部門を自動推定する機能は含みません。
+
 ## クイックスタート
 
 実データを `IOSystem` に渡すまでの責務分担と、会計規約を選ぶ3つの完全例は [integration guide](docs/integration-guide.md) にまとめています。
@@ -46,18 +60,18 @@ print(report.summary())
 個別の診断結果には、次のようにアクセスできます。
 
 ```python
-report.structure
-report.orientation
-report.accounting
-report.zero_structure
-report.coefficients
-report.stability
-report.reference
-report.signs
-report.scale
-report.components
-report.metadata
-report.provenance
+report.structure       # Z/x/Y/V とラベルの構造
+report.orientation     # 行列の向き・転置候補
+report.accounting      # 投入側・産出側の会計残差
+report.zero_structure  # ゼロ産出・ゼロ行列構造
+report.coefficients    # 技術係数 A
+report.stability       # I-A、スペクトラル半径、条件数
+report.reference       # A/L参照行列との差
+report.signs           # 負値の位置と値
+report.scale           # 桁・単位ミスの候補
+report.components      # Y/V subtotal二重計上候補
+report.metadata        # 年・単位等の意味情報
+report.provenance      # 入力hash・実行条件
 ```
 
 ## 診断ステータス
@@ -574,6 +588,20 @@ It audits data structure, accounting consistency, matrix orientation, zero struc
 
 `ioaudit` reports problems and ambiguity, but it does not silently transpose, rebalance, delete, rescale, or otherwise repair the supplied table. When required information is unavailable, the affected diagnostic is reported as `SKIPPED` rather than inferred.
 
+## What it can do
+
+`audit()` provides a single preflight pass for checks such as:
+
+- shape, type, order, and label alignment for `Z`, `x`, `Y`, and `V`
+- possible transposition, total rows or columns, non-sector content, and duplicate labels
+- input- and output-side residuals under an explicitly declared accounting convention
+- subtotal double-counting risk in `Y` / `V`, trade representation, and missing input adjustments
+- technical coefficients `A`, the Leontief inverse, spectral radius, and condition number
+- comparison with `A_reference` / `L_reference` and evidence for possible scale errors
+- human-readable summaries, JSON/DataFrame export, and CI gates
+
+CSV and other delimited files can be checked separately with `inspect_csv()`. The library does not infer the table range or sector definitions from a file.
+
 ## Quickstart
 
 For the boundary between caller-side parsing and `IOSystem`, plus three complete integration examples, see the [integration guide](docs/integration-guide.md).
@@ -605,18 +633,18 @@ print(report.summary())
 Individual diagnostics are available through the returned `AuditReport`:
 
 ```python
-report.structure
-report.orientation
-report.accounting
-report.zero_structure
-report.coefficients
-report.stability
-report.reference
-report.signs
-report.scale
-report.components
-report.metadata
-report.provenance
+report.structure       # structure of Z/x/Y/V and labels
+report.orientation     # orientation and transpose evidence
+report.accounting      # input/output accounting residuals
+report.zero_structure  # zero-output and zero-structure evidence
+report.coefficients    # technical coefficients A
+report.stability       # I-A, spectral radius, and condition number
+report.reference       # differences from A/L references
+report.signs           # locations and values of negative entries
+report.scale           # possible scale-error evidence
+report.components      # Y/V subtotal double-counting candidates
+report.metadata        # year, unit, and semantic metadata
+report.provenance      # input hash and execution settings
 ```
 
 ## Diagnostic statuses
