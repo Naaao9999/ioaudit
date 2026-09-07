@@ -17,7 +17,7 @@ from .results import AuditReport
 from .scale import diagnose_scale
 from .signs import diagnose_signs
 from .stability import diagnose_stability
-from .structure import _is_sparse, diagnose_structure
+from .structure import _core_inputs_are_safe, _is_sparse, diagnose_structure
 from .zero_output import diagnose_zero_output
 
 
@@ -56,6 +56,9 @@ def audit(
     structure, arrays = diagnose_structure(io)
     z = arrays.get("Z")
     x = arrays.get("x")
+    core_inputs_safe = _core_inputs_are_safe(structure)
+    dependent_z = z if core_inputs_safe else None
+    dependent_x = x if core_inputs_safe else None
     method = _select_method(
         numerical_method,
         structure.n_rows if structure.z_is_square == "PASS" else None,
@@ -68,7 +71,9 @@ def audit(
     )
 
     components = diagnose_components(io)
-    zero_structure = diagnose_zero_output(z, x, list(io.sectors), io.Y, io.V)
+    zero_structure = diagnose_zero_output(
+        dependent_z, dependent_x, list(io.sectors), io.Y, io.V
+    )
     accounting = diagnose_accounting(
         z,
         x,
@@ -77,14 +82,26 @@ def audit(
         list(io.sectors),
         tolerance=accounting_tolerance,
         components=components,
+        structure=structure,
     )
     metadata = diagnose_metadata(io.metadata)
     orientation = diagnose_orientation(io, z, x, structure, components)
-    coefficients = diagnose_coefficients(z, x)
+    coefficients = diagnose_coefficients(
+        z,
+        x,
+        alignment_safe=core_inputs_safe,
+        alignment_reason=(
+            "Z, x, or their sector labels are not safely aligned; coefficients are SKIPPED"
+            if not core_inputs_safe
+            else None
+        ),
+    )
     stability = diagnose_stability(coefficients.A, numerical_method=method)
     reference = diagnose_reference(io, coefficients.A, stability.leontief_inverse)
     signs = diagnose_signs(io)
-    scale = diagnose_scale(z, x, io, accounting, list(io.sectors))
+    scale = diagnose_scale(
+        dependent_z, dependent_x, io, accounting, list(io.sectors)
+    )
 
     methods.spectral_radius_exact = stability.spectral_radius_exact
     methods.condition_number_exact = stability.condition_number_exact
@@ -99,6 +116,12 @@ def audit(
     errors: list[str] = []
     warnings.extend(accounting.notes)
     warnings.extend(metadata.notes)
+    warnings.extend(structure.details.get("normalized_label_warnings", []))
+    warnings.extend(getattr(structure, "supporting_warnings", []))
+    warnings.extend(
+        f"supporting input issue: {message}"
+        for message in getattr(structure, "supporting_failures", [])
+    )
     if components.double_count_risk:
         warnings.append(
             "Y/V subtotal components may be double-counted; inspect report.components.double_count_risk"

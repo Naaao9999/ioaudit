@@ -647,8 +647,18 @@ def diagnose_scale(
     try:
         row_sum = _axis_sum(z, 1)
         column_sum = _axis_sum(z, 0)
-        f, _ = _vector(getattr(io, "Y", None), expected="Y", n=z_shape[0])
-        v, _ = _vector(getattr(io, "V", None), expected="V", n=z_shape[0])
+        f, _ = _vector(
+            getattr(io, "Y", None),
+            expected="Y",
+            n=z_shape[0],
+            sectors=sectors,
+        )
+        v, _ = _vector(
+            getattr(io, "V", None),
+            expected="V",
+            n=z_shape[0],
+            sectors=sectors,
+        )
     except (TypeError, ValueError, FloatingPointError) as exc:
         result.reason = f"scale diagnostics could not read accounting fields: {exc}"
         return result

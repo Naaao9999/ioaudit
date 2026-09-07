@@ -130,7 +130,13 @@ def _negative_entries(matrix: Any) -> dict[str, Any]:
     }
 
 
-def diagnose_coefficients(z: Any, x: np.ndarray | None) -> CoefficientDiagnostics:
+def diagnose_coefficients(
+    z: Any,
+    x: np.ndarray | None,
+    *,
+    alignment_safe: bool = True,
+    alignment_reason: str | None = None,
+) -> CoefficientDiagnostics:
     """Construct finite coefficients without allowing zero-output leakage.
 
     A zero-output column with a zero transaction column is represented by a
@@ -140,6 +146,11 @@ def diagnose_coefficients(z: Any, x: np.ndarray | None) -> CoefficientDiagnostic
     """
 
     result = CoefficientDiagnostics()
+    if not alignment_safe:
+        result.reason = alignment_reason or (
+            "Z, x, or their sector labels are not safely aligned; coefficients are SKIPPED"
+        )
+        return result
     z_shape = _shape_of(z) if z is not None else ()
     if x is not None and getattr(x, "ndim", None) == 1:
         result.zero_output_mask = (x == 0).tolist()

@@ -58,6 +58,6 @@ def test_invalid_optional_reference_does_not_fail_core_structure_or_stop_audit(n
     assert report.stability.status == "PASS"
     assert report.accounting.status == "AVAILABLE"
     assert report.passed() is True
-    assert report.passed(fail_on_reference=True) is False
+    assert report.passed(fail_on_invalid_reference=True) is False
     with pytest.raises(IOAuditError):
-        report.raise_for_status(fail_on_reference=True)
+        report.raise_for_status(fail_on_invalid_reference=True)

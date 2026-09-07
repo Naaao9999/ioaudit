@@ -15,7 +15,15 @@ from ._balance_core import (
     trade_side as _trade_side,
     vector as _vector,
 )
-from .structure import _all_finite, _labels, _shape_of
+from .structure import (
+    _alignment_is_safe,
+    _all_finite,
+    _core_inputs_are_safe,
+    _labels,
+    _same_labels,
+    _same_normalized_labels,
+    _shape_of,
+)
 
 
 @dataclass
@@ -24,8 +32,11 @@ class OrientationDiagnostics:
 
     status: str = "SKIPPED"
     row_labels_match_columns: bool | None = None
+    normalized_row_labels_match_columns: bool | None = None
     sector_order_consistent: bool | None = None
+    normalized_sector_order_consistent: bool | None = None
     x_alignment: bool | None = None
+    normalized_x_alignment: bool | None = None
     possible_transpose: bool | None = None
     current_orientation_accounting_residual: float | None = None
     transposed_orientation_accounting_residual: float | None = None
@@ -64,6 +75,7 @@ def _score(
                 side="inflows",
                 scope=convention.external_flow_scope,
                 n=z.shape[0],
+                sectors=list(io.sectors),
             )
             inflow_adjustment = (
                 _inflow_adjustment(inflows, inflow_sign)
@@ -79,6 +91,7 @@ def _score(
                         side="outflows",
                         scope=convention.external_flow_scope,
                         n=z.shape[0],
+                        sectors=list(io.sectors),
                     )
                     outflow_adjustment = (
                         _outflow_adjustment(outflows, convention.outflow_sign)
@@ -131,37 +144,72 @@ def diagnose_orientation(
         return result
     z_index, z_columns = _labels(io.Z)
     if z_index is not None and z_columns is not None:
-        result.row_labels_match_columns = (
-            len(z_index) == len(z_columns) and all(a == b for a, b in zip(z_index, z_columns))
+        result.row_labels_match_columns = _same_labels(z_index, z_columns)
+        result.normalized_row_labels_match_columns = _same_normalized_labels(
+            z_index, z_columns
         )
         result.sector_order_consistent = (
             len(io.sectors) == z_shape[0]
             and all(a == b for a, b in zip(z_index, io.sectors))
             and all(a == b for a, b in zip(z_columns, io.sectors))
         )
+        result.normalized_sector_order_consistent = (
+            _same_normalized_labels(z_index, list(io.sectors))
+            and _same_normalized_labels(z_columns, list(io.sectors))
+            if len(io.sectors) == z_shape[0]
+            else False
+        )
     else:
         result.row_labels_match_columns = None
+        result.normalized_row_labels_match_columns = None
         result.sector_order_consistent = len(io.sectors) == z.shape[0]
+        result.normalized_sector_order_consistent = result.sector_order_consistent
     x_index, _ = _labels(io.x)
     result.x_alignment = (
         all(a == b for a, b in zip(x_index, io.sectors))
         if x_index is not None and len(x_index) == len(io.sectors)
         else (len(x) == len(io.sectors) if x_index is None else False)
     )
+    result.normalized_x_alignment = (
+        _same_normalized_labels(x_index, list(io.sectors))
+        if x_index is not None and len(x_index) == len(io.sectors)
+        else (len(x) == len(io.sectors) if x_index is None else False)
+    )
+
+    if not _core_inputs_are_safe(structure):
+        result.evidence.append(
+            "core Z/x values or sector labels are not safely aligned; orientation comparison is SKIPPED"
+        )
+        result.status = "FAIL"
+        return result
 
     if io.accounting is None:
         result.evidence.append("AccountingConvention was not supplied")
         result.status = (
             "FAIL"
-            if result.sector_order_consistent is False or result.x_alignment is False
+            if not _alignment_is_safe(
+                result.sector_order_consistent,
+                result.normalized_sector_order_consistent,
+            )
+            or not _alignment_is_safe(
+                result.x_alignment, result.normalized_x_alignment
+            )
             else "PASS"
         )
         return result
     component_risks = getattr(components, "double_count_risk", []) if components is not None else []
     y_subtotal_risk = any(item.get("field") == "Y" for item in component_risks)
     v_subtotal_risk = any(item.get("field") == "V" for item in component_risks)
-    f, _ = (None, "Y subtotal risk") if y_subtotal_risk else _vector(io.Y, expected="Y", n=z.shape[0])
-    v, _ = (None, "V subtotal risk") if v_subtotal_risk else _vector(io.V, expected="V", n=z.shape[0])
+    f, _ = (
+        (None, "Y subtotal risk")
+        if y_subtotal_risk
+        else _vector(io.Y, expected="Y", n=z.shape[0], sectors=list(io.sectors))
+    )
+    v, _ = (
+        (None, "V subtotal risk")
+        if v_subtotal_risk
+        else _vector(io.V, expected="V", n=z.shape[0], sectors=list(io.sectors))
+    )
     if y_subtotal_risk:
         result.evidence.append("Y subtotal/total risk excluded from orientation comparison")
     if v_subtotal_risk:
@@ -170,7 +218,13 @@ def diagnose_orientation(
         result.evidence.append("Y or V is unavailable for orientation comparison")
         result.status = (
             "FAIL"
-            if result.sector_order_consistent is False or result.x_alignment is False
+            if not _alignment_is_safe(
+                result.sector_order_consistent,
+                result.normalized_sector_order_consistent,
+            )
+            or not _alignment_is_safe(
+                result.x_alignment, result.normalized_x_alignment
+            )
             else "PASS"
         )
         return result
@@ -203,7 +257,11 @@ def diagnose_orientation(
         result.evidence.append("orientation residual comparison is unavailable")
     result.status = (
         "FAIL"
-        if result.sector_order_consistent is False or result.x_alignment is False
+        if not _alignment_is_safe(
+            result.sector_order_consistent,
+            result.normalized_sector_order_consistent,
+        )
+        or not _alignment_is_safe(result.x_alignment, result.normalized_x_alignment)
         else "PASS"
     )
     return result
