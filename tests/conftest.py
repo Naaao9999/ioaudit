@@ -11,7 +11,7 @@ def normal_data():
     sectors = ["A", "B"]
     y = np.array([[5.0], [5.0]])
     v = np.array([[5.0, 5.0]])
-    convention = AccountingConvention.japan_competitive()
+    convention = AccountingConvention.domestic_competitive()
     return z, x, sectors, y, v, convention
 
 
