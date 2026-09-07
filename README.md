@@ -1,6 +1,6 @@
 # ioaudit
 
-日本語と English の README です。
+**Preflight diagnostics for input-output tables.**
 
 `ioaudit` は、産業連関表を分析へ投入する前に、データ構造、行列の向き、会計整合性、投入係数、Leontief 系の数値安定性、外部参照行列との差を機械的に診断する Python ライブラリです。
 
@@ -27,40 +27,43 @@ Python 3.10 or later is required.
 ```python
 import numpy as np
 
-from ioaudit import IOSystem, TradeFlows, AccountingConvention, audit
+from ioaudit import IOSystem, audit
 
-Z = np.array([[10.0, 2.0], [3.0, 8.0]])
+Z = np.array([
+    [10.0, 2.0],
+    [3.0, 8.0],
+])
+
 x = np.array([18.0, 18.0])
-sectors = ["agriculture", "manufacturing"]
-Y = np.array([[7.0], [7.0]])
-V = np.array([[5.0, 8.0]])
-imports = np.array([-1.0, 0.0])
-trade = TradeFlows(international_imports=imports)
 
 io = IOSystem(
     Z=Z,
     x=x,
-    sectors=sectors,
-    Y=Y,
-    V=V,
-    trade=trade,
-    accounting=AccountingConvention(
-        transaction_scope="domestic",
-        import_treatment="competitive",
-        trade_representation="outflows_in_Y",
-        external_flow_scope="international",
-        inflow_sign="negative",
-        outflow_sign="positive",
-    ),
+    sectors=["agriculture", "manufacturing"],
 )
+
 report = audit(io)
 print(report.summary())
-print(report.accounting.max_relative_residual)
-print(report.stability.spectral_radius)
-print(report.orientation.possible_transpose)
 ```
 
-The same example uses the public `IOSystem`, `TradeFlows`, `AccountingConvention`, and `audit` API. `report.summary()`, `report.accounting.max_relative_residual`, `report.stability.spectral_radius`, and `report.orientation.possible_transpose` are available after the audit.
+最低限、取引行列 `Z`、産出額 `x`、部門名 `sectors` があれば監査できます。Y/Vや `AccountingConvention` を指定すると、会計監査が追加されます。
+
+At minimum, an audit can be run with the transaction matrix `Z`, output vector `x`, and sector identifiers. Adding `Y`, `V`, and an explicit `AccountingConvention` enables accounting diagnostics.
+
+個別の診断結果には、例えば次のようにアクセスできます。
+
+```python
+print(report.structure.status)
+print(report.orientation.possible_transpose)
+print(report.stability.spectral_radius)
+print(report.scale.possible_cell_scale_errors)
+```
+
+The public entry points are `IOSystem`, `TradeFlows`, `AccountingConvention`, and `audit`. Reports also provide `summary()`, `to_dict()`, `to_json()`, and `to_dataframe()`.
+
+会計情報が不足している診断は、値を推測せず `SKIPPED` になります。
+
+Diagnostics that require unavailable accounting information are marked `SKIPPED` rather than inferred.
 
 ## Design principle / 設計原則
 
