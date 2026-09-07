@@ -813,6 +813,20 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
             _duplicate_normalized_labels(field_index, "input_adjustments.index")
         )
 
+    core_dimensions = {
+        "Z.index",
+        "Z.columns",
+        "sectors",
+        "x.index",
+    }
+    accounting_dimensions = {
+        "Y.index",
+        "V.columns",
+    }
+    component_dimensions = {
+        "Y.columns",
+        "V.index",
+    }
     supporting_dimensions = {
         "input_adjustments.columns",
         "input_adjustments.index",
@@ -820,8 +834,17 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     core_normalized_duplicates = [
         duplicate
         for duplicate in result.duplicate_labels_after_normalization
-        if duplicate.get("dimension") not in supporting_dimensions
-        and not str(duplicate.get("dimension", "")).startswith("trade.")
+        if duplicate.get("dimension") in core_dimensions
+    ]
+    accounting_normalized_duplicates = [
+        duplicate
+        for duplicate in result.duplicate_labels_after_normalization
+        if duplicate.get("dimension") in accounting_dimensions
+    ]
+    component_normalized_duplicates = [
+        duplicate
+        for duplicate in result.duplicate_labels_after_normalization
+        if duplicate.get("dimension") in component_dimensions
     ]
     supporting_normalized_duplicates = [
         duplicate
@@ -830,6 +853,8 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         or str(duplicate.get("dimension", "")).startswith("trade.")
     ]
     result.details["core_normalized_duplicates"] = core_normalized_duplicates
+    result.details["accounting_normalized_duplicates"] = accounting_normalized_duplicates
+    result.details["component_normalized_duplicates"] = component_normalized_duplicates
     result.details["supporting_normalized_duplicates"] = supporting_normalized_duplicates
 
     normalized_label_warnings: list[str] = []
@@ -986,7 +1011,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         not _alignment_is_safe(result.x_labels_match, result.normalized_x_labels_match),
         not _alignment_is_safe(result.y_labels_match, result.normalized_y_labels_match),
         not _alignment_is_safe(result.v_labels_match, result.normalized_v_labels_match),
-        bool(core_normalized_duplicates),
+        bool(core_normalized_duplicates or accounting_normalized_duplicates),
         result.y_shape == FAIL,
         result.v_shape == FAIL,
     ]

@@ -14,6 +14,13 @@ def test_model_copies_inputs(normal_data):
     assert io.x[0] == 8
 
 
+def test_model_deep_copies_nested_sequence_inputs():
+    source = [[1.0, 2.0], [3.0, 4.0]]
+    io = IOSystem(source, [5.0, 6.0], ["A", "B"])
+    source[0][0] = 999.0
+    assert io.Z[0][0] == 1.0
+
+
 def test_tradeflows_and_audit_do_not_mutate_source_arrays(normal_data):
     from ioaudit import audit
 

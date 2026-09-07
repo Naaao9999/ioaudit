@@ -20,8 +20,8 @@ def test_negative_signed_entries_are_informational():
     assert report.signs.negative_transaction_cells.count == 1
     assert report.signs.negative_final_demand.count == 1
     assert report.signs.negative_value_added.count == 1
-    assert report.signs.negative_imports.count == 1
-    assert report.signs.negative_exports.count == 1
+    assert report.signs.negative_inflows.count == 1
+    assert report.signs.negative_outflows.count == 1
     assert report.signs.status == "AVAILABLE"
 
 
@@ -38,5 +38,5 @@ def test_negative_tradeflows_are_reported_and_list_y_is_safe():
             ),
         )
     )
-    assert report.signs.negative_imports.count == 1
-    assert report.signs.negative_exports.count == 1
+    assert report.signs.negative_inflows.count == 1
+    assert report.signs.negative_outflows.count == 1

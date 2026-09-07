@@ -61,3 +61,26 @@ def test_invalid_optional_reference_does_not_fail_core_structure_or_stop_audit(n
     assert report.passed(fail_on_invalid_reference=True) is False
     with pytest.raises(IOAuditError):
         report.raise_for_status(fail_on_invalid_reference=True)
+
+
+def test_scale_does_not_use_reference_with_mismatched_labels(normal_io):
+    reference = pd.DataFrame(
+        normal_io.Z / normal_io.x[np.newaxis, :],
+        index=["B", "A"],
+        columns=["B", "A"],
+    )
+    report = audit(
+        IOSystem(
+            normal_io.Z,
+            normal_io.x,
+            normal_io.sectors,
+            Y=normal_io.Y,
+            V=normal_io.V,
+            accounting=normal_io.accounting,
+            A_reference=reference,
+        )
+    )
+    assert report.reference.A.status == "FAIL"
+    assert report.scale.reference_evidence_used is False
+    assert report.scale.reference_evidence_reason
+    assert all("reference_evidence" not in item for item in report.scale.possible_cell_scale_errors)

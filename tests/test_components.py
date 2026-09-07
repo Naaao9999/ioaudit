@@ -87,3 +87,33 @@ def test_partial_subset_subtotal_is_reported_with_subset_members():
     assert candidate["subset_labels"] == ["P3 S13", "P3 S14", "P3 S15"]
     assert candidate["sum_similarity"] == 1.0
     assert report.accounting.output_balance.status == "SKIPPED"
+
+
+def test_component_label_duplicates_skip_only_affected_accounting_side():
+    y = pd.DataFrame(
+        [[0.45, 0.45], [0.45, 0.45]],
+        index=["A", "B"],
+        columns=["Household", "Household "],
+    )
+    report = audit(
+        IOSystem(
+            np.eye(2) * 0.1,
+            np.ones(2),
+            ["A", "B"],
+            Y=y,
+            V=np.full(2, 0.9),
+            accounting=AccountingConvention(
+                transaction_scope="domestic",
+                import_treatment="competitive",
+                trade_representation="embedded",
+                input_representation="complete",
+            ),
+        )
+    )
+    assert report.structure.status == "PASS"
+    assert report.components.status == "WARNING"
+    assert report.components.component_label_risks
+    assert report.coefficients.status == "PASS"
+    assert report.stability.status == "PASS"
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert report.accounting.input_balance.status == "PASS"

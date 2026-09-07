@@ -17,6 +17,8 @@
 
 ## クイックスタート
 
+実データを `IOSystem` に渡すまでの責務分担と、会計規約を選ぶ3つの完全例は [integration guide](docs/integration-guide.md) にまとめています。
+
 最低限、取引行列 `Z`、産出額 `x`、部門名 `sectors` があれば監査できます。
 
 ```python
@@ -573,6 +575,8 @@ It audits data structure, accounting consistency, matrix orientation, zero struc
 `ioaudit` reports problems and ambiguity, but it does not silently transpose, rebalance, delete, rescale, or otherwise repair the supplied table. When required information is unavailable, the affected diagnostic is reported as `SKIPPED` rather than inferred.
 
 ## Quickstart
+
+For the boundary between caller-side parsing and `IOSystem`, plus three complete integration examples, see the [integration guide](docs/integration-guide.md).
 
 At minimum, an audit requires a transaction matrix `Z`, an output vector `x`, and sector identifiers.
 

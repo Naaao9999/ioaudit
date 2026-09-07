@@ -27,8 +27,8 @@ class SignDiagnostics:
     negative_transaction_cells: NegativeEntries = field(default_factory=NegativeEntries)
     negative_final_demand: NegativeEntries = field(default_factory=NegativeEntries)
     negative_value_added: NegativeEntries = field(default_factory=NegativeEntries)
-    negative_imports: NegativeEntries = field(default_factory=NegativeEntries)
-    negative_exports: NegativeEntries = field(default_factory=NegativeEntries)
+    negative_inflows: NegativeEntries = field(default_factory=NegativeEntries)
+    negative_outflows: NegativeEntries = field(default_factory=NegativeEntries)
     total_negative_entries: int = 0
 
 
@@ -105,25 +105,25 @@ def diagnose_signs(io: Any) -> SignDiagnostics:
     v_index, v_columns = _labels(io.V)
     trade = getattr(io, "trade", None)
     if trade is not None:
-        negative_imports = _trade_negative_entries(
+        negative_inflows = _trade_negative_entries(
             trade,
             ("interregional_inflows", "international_imports", "combined_inflows"),
             z_index,
         )
-        negative_exports = _trade_negative_entries(
+        negative_outflows = _trade_negative_entries(
             trade,
             ("interregional_outflows", "international_exports", "combined_outflows"),
             z_index,
         )
     else:
-        negative_imports = NegativeEntries()
-        negative_exports = NegativeEntries()
+        negative_inflows = NegativeEntries()
+        negative_outflows = NegativeEntries()
     result = SignDiagnostics(
         negative_transaction_cells=_negative(io.Z, "Z", z_index, z_columns),
         negative_final_demand=_negative(io.Y, "Y", y_index),
         negative_value_added=_negative(io.V, "V", v_index, v_columns),
-        negative_imports=negative_imports,
-        negative_exports=negative_exports,
+        negative_inflows=negative_inflows,
+        negative_outflows=negative_outflows,
     )
     result.total_negative_entries = sum(
         item.count
@@ -131,8 +131,8 @@ def diagnose_signs(io: Any) -> SignDiagnostics:
             result.negative_transaction_cells,
             result.negative_final_demand,
             result.negative_value_added,
-            result.negative_imports,
-            result.negative_exports,
+            result.negative_inflows,
+            result.negative_outflows,
         )
     )
     return result

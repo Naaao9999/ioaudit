@@ -9,7 +9,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .structure import _all_finite, _as_array, _shape_of, _normalize_label
+from .structure import (
+    _all_finite,
+    _as_array,
+    _duplicate_normalized_labels,
+    _normalize_label,
+    _shape_of,
+)
 
 
 _SUBTOTAL_LABELS = frozenset(
@@ -65,6 +71,7 @@ class ComponentsDiagnostics:
     possible_subtotal_columns: list[dict[str, Any]] = field(default_factory=list)
     possible_subtotal_rows: list[dict[str, Any]] = field(default_factory=list)
     double_count_risk: list[dict[str, Any]] = field(default_factory=list)
+    component_label_risks: list[dict[str, Any]] = field(default_factory=list)
     reason: str | None = None
 
 
@@ -221,8 +228,30 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
         found = _candidates(value, field_name=field_name, axis=axis)
         if axis == 1:
             result.possible_subtotal_columns.extend(found)
+            if isinstance(value, pd.DataFrame):
+                result.component_label_risks.extend(
+                    {
+                        **duplicate,
+                        "field": field_name,
+                        "reason": "component labels are duplicated after Unicode/whitespace normalization",
+                    }
+                    for duplicate in _duplicate_normalized_labels(
+                        value.columns.tolist(), f"{field_name}.columns"
+                    )
+                )
         else:
             result.possible_subtotal_rows.extend(found)
+            if isinstance(value, pd.DataFrame):
+                result.component_label_risks.extend(
+                    {
+                        **duplicate,
+                        "field": field_name,
+                        "reason": "component labels are duplicated after Unicode/whitespace normalization",
+                    }
+                    for duplicate in _duplicate_normalized_labels(
+                        value.index.tolist(), f"{field_name}.index"
+                    )
+                )
     result.double_count_risk = [
         {
             **candidate,
@@ -232,7 +261,11 @@ def diagnose_components(io: Any) -> ComponentsDiagnostics:
         for candidate in result.possible_subtotal_columns + result.possible_subtotal_rows
     ]
     if available:
-        result.status = "WARNING" if result.double_count_risk else "AVAILABLE"
+        result.status = (
+            "WARNING"
+            if result.double_count_risk or result.component_label_risks
+            else "AVAILABLE"
+        )
     else:
         result.reason = "Y/V has no auditable multi-component dimension"
     return result
