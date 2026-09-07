@@ -100,7 +100,12 @@ def audit(
     reference = diagnose_reference(io, coefficients.A, stability.leontief_inverse)
     signs = diagnose_signs(io)
     scale = diagnose_scale(
-        dependent_z, dependent_x, io, accounting, list(io.sectors)
+        dependent_z,
+        dependent_x,
+        io,
+        accounting,
+        list(io.sectors),
+        reference_diagnostics=reference,
     )
 
     methods.spectral_radius_exact = stability.spectral_radius_exact
@@ -125,6 +130,10 @@ def audit(
     if components.double_count_risk:
         warnings.append(
             "Y/V subtotal components may be double-counted; inspect report.components.double_count_risk"
+        )
+    if getattr(components, "component_label_risks", []):
+        warnings.append(
+            "Y/V component labels may be ambiguous; inspect report.components.component_label_risks"
         )
     if getattr(scale, "status", None) in {"AVAILABLE", "WARNING"} and getattr(
         scale, "cell_status", None

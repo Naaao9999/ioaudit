@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from ._balance_core import vector as _vector
 from .structure import _all_finite, _is_sparse, _shape_of
 
 
@@ -88,23 +89,18 @@ def diagnose_zero_output(
     result.consistent_zero_output = not result.inconsistent_sectors
     result.status = "FAIL" if result.inconsistent_sectors else "PASS"
 
-    def _aggregate(value: Any, expected_axis: int, length: int) -> np.ndarray | None:
-        if value is None:
-            return None
-        try:
-            if not _all_finite(value):
-                return None
-            array = np.asarray(value.toarray() if _is_sparse(value) else value, dtype=float)
-            if array.ndim == 1 and array.shape == (length,):
-                return array
-            if array.ndim == 2 and array.shape[expected_axis] == length:
-                return array.sum(axis=1 if expected_axis == 0 else 0)
-        except (TypeError, ValueError, FloatingPointError):
-            return None
-        return None
-
-    final_demand = _aggregate(y, 0, z_shape[0])
-    value_added = _aggregate(v, 1, z_shape[1])
+    final_demand, _ = _vector(
+        y,
+        expected="Y",
+        n=z_shape[0],
+        sectors=sectors,
+    )
+    value_added, _ = _vector(
+        v,
+        expected="V",
+        n=z_shape[1],
+        sectors=sectors,
+    )
     if final_demand is None:
         result.all_zero_rows_without_final_demand_evidence = list(result.all_zero_rows)
     else:

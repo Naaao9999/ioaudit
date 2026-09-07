@@ -52,6 +52,8 @@ class ScaleDiagnostics:
     rounding_context_available: bool = False
     cell_status: str = "SKIPPED"
     cell_reason: str | None = "scale diagnostics unavailable"
+    reference_evidence_used: bool = False
+    reference_evidence_reason: str | None = None
     reason: str | None = None
 
     @property
@@ -194,9 +196,24 @@ def _cell_values(z: Any):
         yield int(row), int(column), float(array[row, column])
 
 
-def _reference_array(io: Any, shape: tuple[int, ...]) -> np.ndarray | None:
+def _reference_array(
+    io: Any,
+    shape: tuple[int, ...],
+    *,
+    reference_diagnostics: Any = None,
+) -> np.ndarray | None:
     reference = getattr(io, "A_reference", None)
     if reference is None:
+        return None
+    comparison = getattr(reference_diagnostics, "A", None)
+    if comparison is None:
+        return None
+    if getattr(comparison, "status", "SKIPPED") in {"FAIL", "SKIPPED"}:
+        return None
+    if getattr(comparison, "shape_consistency", None) is not True:
+        return None
+    label_consistency = getattr(comparison, "label_consistency", None)
+    if label_consistency is False:
         return None
     try:
         numeric, bad = _numeric_array(reference)
@@ -607,6 +624,8 @@ def diagnose_scale(
     accounting: Any,
     sectors: list[Any],
     factors: tuple[float, ...] = DEFAULT_SCALE_FACTORS,
+    *,
+    reference_diagnostics: Any = None,
 ) -> ScaleDiagnostics:
     """Find scale factors that materially reduce declared balance residuals."""
 
@@ -695,7 +714,17 @@ def diagnose_scale(
         factors=factors,
         tolerance=tolerance,
     )
-    a_reference = _reference_array(io, z_shape)
+    a_reference = _reference_array(
+        io,
+        z_shape,
+        reference_diagnostics=reference_diagnostics,
+    )
+    result.reference_evidence_used = a_reference is not None
+    if getattr(io, "A_reference", None) is not None and not result.reference_evidence_used:
+        result.reference_evidence_reason = (
+            "A_reference was excluded from scale evidence because its shape or labels "
+            "were not safely validated"
+        )
     if tolerance is not None:
         result.possible_cell_scale_errors = _cell_candidates(
             z=z,

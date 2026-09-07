@@ -11,7 +11,7 @@ def test_balanced_input_and_output(normal_io):
     assert report.accounting.input_balance.max_absolute_residual == 0
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert report.accounting.convention["import_treatment"] == "competitive"
-    assert "imports (imports are signed)" in report.accounting.formula
+    assert "inflow (signed)" in report.accounting.formula
 
 
 def test_imbalance_and_conventions():
@@ -130,9 +130,10 @@ def test_noncompetitive_import_accounting_uses_explicit_vectors():
             accounting=convention,
         )
     )
-    assert report.accounting.import_adjustment_applied is True
-    assert report.accounting.imports_used is True
-    assert report.accounting.exports_used is True
+    assert report.accounting.inflow_adjustment_applied is True
+    assert report.accounting.outflow_adjustment_applied is True
+    assert report.accounting.inflows_used is True
+    assert report.accounting.outflows_used is True
     assert report.accounting.output_balance.max_absolute_residual == 0
     assert "inflow (international_imports)" in report.accounting.output_balance.equation
 
@@ -162,9 +163,9 @@ def test_competitive_import_accounting_uses_signed_import_row():
         )
     )
     assert report.accounting.output_balance.max_absolute_residual == 0
-    assert report.accounting.import_adjustment_applied is True
-    assert report.accounting.imports_used is True
-    assert "imports (imports are signed)" in report.accounting.formula
+    assert report.accounting.inflow_adjustment_applied is True
+    assert report.accounting.inflows_used is True
+    assert "inflow (signed)" in report.accounting.formula
 
 
 def test_competitive_positive_import_accounting_subtracts_magnitude():
@@ -193,7 +194,7 @@ def test_competitive_positive_import_accounting_subtracts_magnitude():
         )
     )
     assert report.accounting.output_balance.max_absolute_residual == 0
-    assert " - imports " in report.accounting.formula
+    assert " - inflow " in report.accounting.formula
 
 
 def test_competitive_unknown_import_sign_skips_output_balance():

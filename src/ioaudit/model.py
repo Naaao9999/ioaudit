@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import copy
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,7 +33,7 @@ def _copy_value(value: Any, name: str, *, allow_none: bool = True) -> Any:
     if isinstance(value, np.ndarray):
         return value.copy()
     if isinstance(value, (list, tuple)):
-        return list(value)
+        return copy.deepcopy(list(value))
     raise IOValidationError(
         f"{name} must be a numpy.ndarray, pandas object, sparse matrix, or sequence"
     )

@@ -68,11 +68,10 @@ class AccountingDiagnostics:
     by_sector: list[dict[str, Any]] = field(default_factory=list)
     max_relative_residual: float | None = None
     convention_required: bool = True
-    import_adjustment_applied: bool = False
+    inflow_adjustment_applied: bool = False
+    outflow_adjustment_applied: bool = False
     input_adjustment_applied: bool = False
     input_adjustments_used: bool = False
-    imports_used: bool = False
-    exports_used: bool = False
     inflows_used: bool = False
     outflows_used: bool = False
     tolerance: dict[str, float] | None = None
@@ -169,8 +168,19 @@ def diagnose_accounting(
         io.V, expected="V", n=n, sectors=sectors
     )
     component_risks = getattr(components, "double_count_risk", []) if components is not None else []
+    component_label_risks = (
+        getattr(components, "component_label_risks", [])
+        if components is not None
+        else []
+    )
     y_subtotal_risk = any(item.get("field") == "Y" for item in component_risks)
     v_subtotal_risk = any(item.get("field") == "V" for item in component_risks)
+    y_component_label_risk = any(
+        item.get("field") == "Y" for item in component_label_risks
+    )
+    v_component_label_risk = any(
+        item.get("field") == "V" for item in component_label_risks
+    )
     if y_subtotal_risk:
         result.notes.append(
             "Y subtotal/total component detected; output balance is SKIPPED rather than auto-excluding a column"
@@ -178,6 +188,14 @@ def diagnose_accounting(
     if v_subtotal_risk:
         result.notes.append(
             "V subtotal/total component detected; input balance is SKIPPED rather than auto-excluding a row"
+        )
+    if y_component_label_risk:
+        result.notes.append(
+            "Y component labels are ambiguous after normalization; output balance is SKIPPED"
+        )
+    if v_component_label_risk:
+        result.notes.append(
+            "V component labels are ambiguous after normalization; input balance is SKIPPED"
         )
     trade = getattr(io, "trade", None)
     row_sum = _axis_sum(z, 1)
@@ -193,6 +211,12 @@ def diagnose_accounting(
         result.formula = "output: SKIPPED because Y contains a possible subtotal/total component"
         result.output_balance.reason = (
             "Y contains a possible subtotal/total component; the correct component subset was not inferred"
+        )
+    elif y_component_label_risk:
+        result.formula = "output: SKIPPED because Y component labels are ambiguous"
+        result.output_balance.reason = (
+            "Y component labels are duplicated after Unicode/whitespace normalization; "
+            "component values were not aggregated positionally"
         )
     elif representation == "unknown":
         result.formula = "output: SKIPPED because trade_representation='unknown'"
@@ -244,18 +268,17 @@ def diagnose_accounting(
                 result.output_balance.reason = "inflow_sign='unknown'; no sign inference is performed"
             else:
                 result.inflows_used = True
-                result.imports_used = True
                 if representation == "outflows_in_Y":
                     if inflow_label == "international_imports" and inflow_sign == "negative":
-                        output_equation = "x = row_sum(Z) + row_sum(Y) + imports (imports are signed)"
+                        output_equation = "x = row_sum(Z) + row_sum(Y) + inflow (signed)"
                         result.formula = (
-                            "output: x = row_sum(Z) + row_sum(Y) + imports (imports are signed); "
+                            "output: x = row_sum(Z) + row_sum(Y) + inflow (signed); "
                             "input: x = column_sum(Z) + column_sum(V)"
                         )
                     elif inflow_label == "international_imports" and inflow_sign == "positive":
-                        output_equation = "x = row_sum(Z) + row_sum(Y) - imports"
+                        output_equation = "x = row_sum(Z) + row_sum(Y) - inflow"
                         result.formula = (
-                            "output: x = row_sum(Z) + row_sum(Y) - imports (positive magnitude); "
+                            "output: x = row_sum(Z) + row_sum(Y) - inflow (positive magnitude); "
                             "input: x = column_sum(Z) + column_sum(V)"
                         )
                     else:
@@ -265,7 +288,7 @@ def diagnose_accounting(
                             "input: x = column_sum(Z) + column_sum(V)"
                         )
                     output_residual = x - (row_sum + f + inflow_adjustment)
-                    result.import_adjustment_applied = True
+                    result.inflow_adjustment_applied = True
                     result.notes.append("outflow_sign not applicable")
                 else:
                     outflows, outflow_reason, outflow_label = _trade_side(
@@ -284,7 +307,8 @@ def diagnose_accounting(
                             result.output_balance.reason = "outflow_sign='unknown'; no sign inference is performed"
                         else:
                             result.outflows_used = True
-                            result.exports_used = True
+                            result.inflow_adjustment_applied = True
+                            result.outflow_adjustment_applied = True
                             output_equation = (
                                 f"x = row_sum(Z) + row_sum(Y) + outflow ({outflow_label}) "
                                 f"- inflow ({inflow_label})"
@@ -294,7 +318,6 @@ def diagnose_accounting(
                                 "output: x = row_sum(Z) + row_sum(Y) + outflow - inflow; "
                                 "input: x = column_sum(Z) + column_sum(V)"
                             )
-                            result.import_adjustment_applied = True
     if result.formula is None:
         result.formula = "output: x = row_sum(Z) + row_sum(Y)"
     if output_residual is not None:
@@ -316,6 +339,12 @@ def diagnose_accounting(
             "V contains a possible subtotal/total component; the correct component subset was not inferred"
         )
         input_equation = "input: SKIPPED because V contains a possible subtotal/total component"
+    elif v_component_label_risk:
+        result.input_balance.reason = (
+            "V component labels are duplicated after Unicode/whitespace normalization; "
+            "component values were not aggregated positionally"
+        )
+        input_equation = "input: SKIPPED because V component labels are ambiguous"
     elif v is None:
         result.input_balance.reason = v_reason
         input_equation = "input: SKIPPED because V is unavailable"

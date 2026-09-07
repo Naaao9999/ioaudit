@@ -138,6 +138,8 @@ def build_provenance(
             ),
             "cell_status": getattr(scale, "cell_status", None),
             "cell_reason": getattr(scale, "cell_reason", None),
+            "reference_evidence_used": getattr(scale, "reference_evidence_used", False),
+            "reference_evidence_reason": getattr(scale, "reference_evidence_reason", None),
         }
     selected_method = getattr(methods, "numerical_method", None)
     try:
