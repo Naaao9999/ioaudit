@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 
-from ._balance_core import vector as _vector
 from .structure import _all_finite, _is_sparse, _shape_of
 
 
@@ -39,11 +38,9 @@ def diagnose_zero_output(
     z: Any,
     x: np.ndarray | None,
     sectors: list[Any],
-    y: Any = None,
-    v: Any = None,
     *,
-    final_demand: np.ndarray | None = None,
-    value_added: np.ndarray | None = None,
+    final_demand: np.ndarray | None,
+    value_added: np.ndarray | None,
 ) -> ZeroOutputDiagnostics:
     """Find zero-output and abnormal zero-structure sectors.
 
@@ -92,20 +89,6 @@ def diagnose_zero_output(
     result.consistent_zero_output = not result.inconsistent_sectors
     result.status = "FAIL" if result.inconsistent_sectors else "PASS"
 
-    if final_demand is None:
-        final_demand, _ = _vector(
-            y,
-            expected="Y",
-            n=z_shape[0],
-            sectors=sectors,
-        )
-    if value_added is None:
-        value_added, _ = _vector(
-            v,
-            expected="V",
-            n=z_shape[1],
-            sectors=sectors,
-        )
     if final_demand is None:
         result.all_zero_rows_without_final_demand_evidence = list(result.all_zero_rows)
     else:

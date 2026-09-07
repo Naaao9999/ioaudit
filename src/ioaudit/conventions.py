@@ -7,7 +7,7 @@ from .exceptions import IOValidationError
 
 TRANSACTION_SCOPES = frozenset({"domestic", "total", "unknown"})
 IMPORT_TREATMENTS = frozenset({"competitive", "noncompetitive", "none", "unknown"})
-IMPORT_SIGNS = frozenset({"negative", "positive", "unknown"})
+FLOW_SIGNS = frozenset({"negative", "positive", "unknown"})
 TRADE_REPRESENTATIONS = frozenset({"embedded", "outflows_in_Y", "separate", "unknown"})
 EXTERNAL_FLOW_SCOPES = frozenset({"international", "interregional", "both", "unknown"})
 INPUT_REPRESENTATIONS = frozenset({"complete", "adjustments_required", "unknown"})
@@ -56,11 +56,11 @@ class AccountingConvention:
             raise IOValidationError(
                 "external_flow_scope must be 'international', 'interregional', 'both', or 'unknown'"
             )
-        if self.inflow_sign not in IMPORT_SIGNS:
+        if self.inflow_sign not in FLOW_SIGNS:
             raise IOValidationError(
                 "inflow_sign must be 'negative', 'positive', or 'unknown'"
             )
-        if self.outflow_sign not in IMPORT_SIGNS:
+        if self.outflow_sign not in FLOW_SIGNS:
             raise IOValidationError(
                 "outflow_sign must be 'negative', 'positive', or 'unknown'"
             )
@@ -133,12 +133,13 @@ class AccountingConvention:
 
     @classmethod
     def total_transactions(cls) -> "AccountingConvention":
-        """Return a total-transactions convention with input completeness explicit.
+        """Return a total-transactions convention with input completeness unspecified.
 
         The table scope and absence of a separate import treatment are fixed
         by the preset name.  Whether the supplied value-added block closes the
         input identity remains source-table metadata and is therefore left
-        unknown unless the caller declares it.
+        as ``"unknown"``.  Callers must declare completeness explicitly when
+        they want the input-side identity to be evaluated.
         """
 
         return cls(

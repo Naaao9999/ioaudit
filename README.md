@@ -125,6 +125,8 @@ report.provenance      # 入力hash・実行条件
 - 最大残差
 - 残差分類
 
+会計式で実際に使用した構成要素は、`input_balance.uses` と `output_balance.uses`（例: `Y`、`V`、`inflows`、`outflows`、`input_adjustments`）で確認できます。
+
 引数なしの `AccountingConvention()` は、会計上の意味を推測しない保守的な設定です。意味情報が `"unknown"` のままなら、影響する会計診断は `SKIPPED` になります。
 
 ### ゼロ産出・ゼロ構造
@@ -163,9 +165,9 @@ A = Z diag(x)^(-1)
 `report.components` は、`Y` の最終需要計や `V` の付加価値計など、他の構成要素をすでに含んでいる可能性がある列・行を診断します。
 
 ```python
+report.components.subtotal_candidates
 report.components.possible_subtotal_columns
 report.components.possible_subtotal_rows
-report.components.double_count_risk
 ```
 
 候補を自動的に除外することはありません。小計候補が検出され、正しい構成要素の選択が曖昧な場合は、対応する `output_balance` または `input_balance` を `SKIPPED` にします。
@@ -735,9 +737,9 @@ and checks:
 `report.components` checks whether columns in `Y` or rows in `V` appear to be totals or subtotals that may already include other supplied components.
 
 ```python
+report.components.subtotal_candidates
 report.components.possible_subtotal_columns
 report.components.possible_subtotal_rows
-report.components.double_count_risk
 ```
 
 Candidates are not removed automatically. If a subtotal candidate makes the correct component selection ambiguous, the corresponding output or input balance is reported as `SKIPPED`.
@@ -928,6 +930,8 @@ Accounting diagnostics are classified as follows:
 - non-zero residual without a declared tolerance: `AVAILABLE` + `residual_class="nonzero"`
 - non-zero residual within the declared tolerance: `PASS` + `residual_class="rounding_level"`
 - residual outside the declared tolerance: `FAIL` + `residual_class="outside_tolerance"`
+
+The components used by each accounting identity are available in `input_balance.uses` and `output_balance.uses`, such as `Y`, `V`, `inflows`, `outflows`, and `input_adjustments`.
 
 The selected tolerance is stored in provenance. Input values are never modified.
 

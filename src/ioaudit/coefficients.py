@@ -26,13 +26,6 @@ class CoefficientDiagnostics:
     distribution: dict[str, float | int | None] = field(default_factory=dict)
     reason: str | None = None
 
-    @property
-    def A_calculated(self) -> Any:
-        """Alias used when comparing the result with a reference matrix."""
-
-        return self.A
-
-
 def _empty_distribution() -> dict[str, float | int | None]:
     return {
         "count": 0,

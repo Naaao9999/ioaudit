@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from ._accounting_plan import AccountingPlan, compile_accounting_plan
-from ._residuals import PlanResiduals, evaluate_plan, evaluate_residual
+from ._accounting_plan import AccountingPlan
+from ._residuals import PlanResiduals, evaluate_residual
 from .conventions import AccountingConvention
 from .structure import _shape_of
 
@@ -28,24 +28,7 @@ class BalanceDiagnostics:
     max_absolute_residual: float | None = None
     max_relative_residual: float | None = None
     reason: str | None = None
-
-    @property
-    def sector_level_residual(self) -> list[float]:
-        """Alias for the sector-level signed residual vector."""
-
-        return self.sector_residual
-
-    @property
-    def MAE(self) -> float | None:
-        """Upper-case alias matching the conventional metric name."""
-
-        return self.mae
-
-    @property
-    def RMSE(self) -> float | None:
-        """Upper-case alias matching the conventional metric name."""
-
-        return self.rmse
+    uses: tuple[str, ...] = ()
 
 
 @dataclass
@@ -57,16 +40,9 @@ class AccountingDiagnostics:
     formula: str | None = None
     input_balance: BalanceDiagnostics = field(default_factory=BalanceDiagnostics)
     output_balance: BalanceDiagnostics = field(default_factory=BalanceDiagnostics)
-    trade_adjusted_input_balance: BalanceDiagnostics = field(default_factory=BalanceDiagnostics)
     by_sector: list[dict[str, Any]] = field(default_factory=list)
     max_relative_residual: float | None = None
     convention_required: bool = True
-    inflow_adjustment_applied: bool = False
-    outflow_adjustment_applied: bool = False
-    input_adjustment_applied: bool = False
-    input_adjustments_used: bool = False
-    inflows_used: bool = False
-    outflows_used: bool = False
     tolerance: dict[str, float] | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -76,6 +52,8 @@ def _balance(
     x: np.ndarray,
     equation: str,
     tolerance: dict[str, float] | None = None,
+    *,
+    uses: tuple[str, ...] | frozenset[str] = (),
 ) -> BalanceDiagnostics:
     """Convert a numeric residual into the public balance result."""
 
@@ -91,6 +69,7 @@ def _balance(
         rmse=evaluation.rmse,
         max_absolute_residual=evaluation.max_absolute,
         max_relative_residual=evaluation.max_relative,
+        uses=tuple(sorted(uses)),
     )
 
 
@@ -105,10 +84,17 @@ def _side_balance(
     result = BalanceDiagnostics(
         equation=getattr(side, "equation", ""),
         reason=getattr(side, "reason", None),
+        uses=tuple(sorted(getattr(side, "uses", ()) or ())),
     )
     if residual is None or x is None or not getattr(side, "available", False):
         return result
-    return _balance(residual, x, getattr(side, "equation", ""), tolerance)
+    return _balance(
+        residual,
+        x,
+        getattr(side, "equation", ""),
+        tolerance,
+        uses=getattr(side, "uses", ()),
+    )
 
 
 def _formula(plan: AccountingPlan) -> str:
@@ -124,45 +110,23 @@ def _formula(plan: AccountingPlan) -> str:
 def diagnose_accounting(
     z: Any,
     x: np.ndarray | None,
-    io: Any,
     convention: AccountingConvention | None,
     sectors: list[Any],
     *,
-    tolerance: dict[str, float] | None = None,
-    components: Any = None,
-    structure: Any = None,
-    plan: AccountingPlan | None = None,
-    baseline: PlanResiduals | None = None,
+    plan: AccountingPlan,
+    baseline: PlanResiduals,
 ) -> AccountingDiagnostics:
     """Report residuals from a compiled accounting plan.
 
-    ``plan`` is optional for callers of this lower-level function.  The
-    top-level audit compiles it once and passes it to every dependent
-    diagnostic.
+    The top-level audit compiles the plan and baseline once and passes them to
+    every dependent diagnostic. This function converts that shared context
+    into the public accounting report.
     """
-
-    if plan is None:
-        plan = compile_accounting_plan(
-            io,
-            z=z,
-            x=x,
-            convention=convention,
-            sectors=sectors,
-            components=components,
-            structure=structure,
-            tolerance=tolerance,
-        )
     result = AccountingDiagnostics(
         convention=convention.to_dict() if convention is not None else None,
         tolerance=plan.tolerance,
         formula=_formula(plan),
         notes=list(plan.notes),
-        inflow_adjustment_applied=plan.inflow_adjustment_applied,
-        outflow_adjustment_applied=plan.outflow_adjustment_applied,
-        input_adjustment_applied=plan.input_adjustment_applied,
-        input_adjustments_used=plan.input_adjustments_used,
-        inflows_used=plan.inflows_used,
-        outflows_used=plan.outflows_used,
     )
     if convention is None:
         result.notes.append(
@@ -170,19 +134,13 @@ def diagnose_accounting(
         )
         return result
 
-    residuals = baseline if baseline is not None else evaluate_plan(z, x, plan)
     result.output_balance = _side_balance(
-        plan.output, residuals.output, plan.x, plan.tolerance
+        plan.output, baseline.output, x, plan.tolerance
     )
     result.input_balance = _side_balance(
-        plan.input, residuals.input, plan.x, plan.tolerance
+        plan.input, baseline.input, x, plan.tolerance
     )
     result.formula = _formula(plan)
-    result.trade_adjusted_input_balance.reason = (
-        "SKIPPED: product/commodity inflows are not reused as user-specific inputs; "
-        "use input_representation='adjustments_required' with an explicit input-side adjustment"
-    )
-
     balances = [result.input_balance, result.output_balance]
     available = [balance for balance in balances if balance.status != "SKIPPED"]
     if not available:

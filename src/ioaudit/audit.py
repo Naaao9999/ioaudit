@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._accounting_plan import _has_component_risk, compile_accounting_plan
+from ._accounting_plan import compile_accounting_plan
 from ._residuals import evaluate_plan
 from .accounting import diagnose_accounting
 from .coefficients import diagnose_coefficients
@@ -84,26 +84,18 @@ def audit(
         tolerance=accounting_tolerance,
     )
     baseline = evaluate_plan(dependent_z, dependent_x, plan)
-    y_component_risk = _has_component_risk(components, "Y")
-    v_component_risk = _has_component_risk(components, "V")
     zero_structure = diagnose_zero_output(
         dependent_z,
         dependent_x,
         list(io.sectors),
-        None if y_component_risk else io.Y,
-        None if v_component_risk else io.V,
         final_demand=plan.y,
         value_added=plan.v,
     )
     accounting = diagnose_accounting(
         z,
         x,
-        io,
         io.accounting,
         list(io.sectors),
-        tolerance=accounting_tolerance,
-        components=components,
-        structure=structure,
         plan=plan,
         baseline=baseline,
     )
@@ -113,8 +105,6 @@ def audit(
         z,
         x,
         structure,
-        components,
-        tolerance=accounting.tolerance,
         plan=plan,
     )
     coefficients = diagnose_coefficients(
@@ -134,7 +124,6 @@ def audit(
         dependent_z,
         dependent_x,
         io,
-        accounting,
         list(io.sectors),
         reference_diagnostics=reference,
         plan=plan,
@@ -147,7 +136,7 @@ def audit(
         io,
         methods,
         requested_numerical_method=numerical_method,
-        accounting_tolerance=getattr(accounting, "tolerance", None),
+        accounting_tolerance=plan.tolerance,
         scale=scale,
     )
     warnings: list[str] = []
@@ -162,7 +151,7 @@ def audit(
     )
     if components.double_count_risk:
         warnings.append(
-            "Y/V subtotal components may be double-counted; inspect report.components.double_count_risk"
+            "Y/V subtotal components may be double-counted; inspect report.components.subtotal_candidates"
         )
     if getattr(components, "component_label_risks", []):
         warnings.append(

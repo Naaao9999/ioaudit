@@ -28,18 +28,15 @@ class BalanceSidePlan:
     offset: np.ndarray | None = None
     equation: str = ""
     reason: str | None = None
+    uses: frozenset[str] = frozenset()
 
 
 @dataclass
 class AccountingPlan:
     """Validated inputs and equations shared by all residual diagnostics."""
 
-    x: np.ndarray | None = None
     y: np.ndarray | None = None
     v: np.ndarray | None = None
-    input_adjustment: np.ndarray | None = None
-    inflow_adjustment: np.ndarray | None = None
-    outflow_adjustment: np.ndarray | None = None
     output: BalanceSidePlan = field(
         default_factory=lambda: BalanceSidePlan(axis=1)
     )
@@ -47,16 +44,6 @@ class AccountingPlan:
         default_factory=lambda: BalanceSidePlan(axis=0)
     )
     tolerance: dict[str, float] | None = None
-    convention: AccountingConvention | None = None
-    input_adjustment_source: str | None = None
-    inflow_label: str | None = None
-    outflow_label: str | None = None
-    inflows_used: bool = False
-    outflows_used: bool = False
-    input_adjustment_applied: bool = False
-    input_adjustments_used: bool = False
-    inflow_adjustment_applied: bool = False
-    outflow_adjustment_applied: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -68,6 +55,16 @@ def _has_component_risk(components: Any, field_name: str) -> bool:
             if item.get("field") == field_name:
                 return True
     return False
+
+
+def _sum_vectors(*values: np.ndarray) -> np.ndarray:
+    """Add accounting offsets while converting overflow into a finite-check result."""
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        result = np.asarray(values[0], dtype=float).copy()
+        for value in values[1:]:
+            result = result + np.asarray(value, dtype=float)
+    return result
 
 
 def _validated_component(
@@ -106,19 +103,21 @@ def _resolve_output(
         # ``unknown`` means that no conflicting declaration was made.  An
         # explicit separate/outflows-in-Y declaration conflicts with a total
         # transaction table and is therefore kept auditable as SKIPPED.
-        if representation != "embedded":
+        if representation in {"separate", "outflows_in_Y"}:
             side.reason = (
                 "transaction_scope='total' is incompatible with the declared "
                 f"trade_representation={representation!r}"
             )
             side.equation = (
-                "output: SKIPPED because transaction_scope='total' requires "
-                "trade_representation='embedded'"
+                "SKIPPED because transaction_scope='total' does not "
+                "support explicitly declared "
+                f"trade_representation={representation!r}"
             )
             return side
         side.available = True
         side.offset = y
         side.equation = "x = row_sum(Z) + row_sum(Y)"
+        side.uses = frozenset({"Y"})
         plan.notes.append("inflow_sign not applicable")
         if getattr(io, "trade", None) is not None and io.trade.has_any:
             plan.notes.append(
@@ -135,14 +134,34 @@ def _resolve_output(
     if representation == "unknown":
         side.reason = "trade_representation is unknown"
         return side
-    if convention.import_treatment == "none" or representation == "embedded":
+    if convention.import_treatment == "none" and representation != "embedded":
+        side.reason = (
+            "import_treatment='none' is incompatible with the declared "
+            f"trade_representation={representation!r}"
+        )
+        side.equation = (
+            "SKIPPED because import_treatment='none' does not support "
+            "explicitly declared "
+            f"trade_representation={representation!r}"
+        )
+        return side
+    if convention.import_treatment == "none":
         side.available = True
         side.offset = y
-        side.equation = (
-            "x = row_sum(Z) + row_sum(Y)"
-            if convention.import_treatment == "none"
-            else "x = row_sum(Z) + row_sum(Y) (trade embedded in Y)"
-        )
+        side.equation = "x = row_sum(Z) + row_sum(Y)"
+        side.uses = frozenset({"Y"})
+        plan.notes.append("inflow_sign not applicable")
+        plan.notes.append("outflow_sign not applicable")
+        if getattr(io, "trade", None) is not None and io.trade.has_any:
+            plan.notes.append(
+                "trade flows were supplied but excluded because import_treatment='none'"
+            )
+        return side
+    if representation == "embedded":
+        side.available = True
+        side.offset = y
+        side.equation = "x = row_sum(Z) + row_sum(Y) (trade embedded in Y)"
+        side.uses = frozenset({"Y"})
         plan.notes.append("inflow_sign not applicable")
         plan.notes.append("outflow_sign not applicable")
         if getattr(io, "trade", None) is not None and io.trade.has_any:
@@ -167,13 +186,10 @@ def _resolve_output(
         side.reason = "inflow_sign='unknown'; no sign inference is performed"
         return side
 
-    plan.inflows_used = True
-    plan.inflow_adjustment_applied = True
-    plan.inflow_adjustment = signed_inflow
-    plan.inflow_label = inflow_label
     if representation == "outflows_in_Y":
         side.available = True
-        side.offset = y + signed_inflow
+        side.offset = _sum_vectors(y, signed_inflow)
+        side.uses = frozenset({"Y", "inflows"})
         side.equation = (
             "x = row_sum(Z) + row_sum(Y) + inflow (signed)"
             if convention.inflow_sign == "negative"
@@ -200,12 +216,9 @@ def _resolve_output(
         side.reason = "outflow_sign='unknown'; no sign inference is performed"
         return side
 
-    plan.outflows_used = True
-    plan.outflow_adjustment_applied = True
-    plan.outflow_adjustment = signed_outflow
-    plan.outflow_label = outflow_label
     side.available = True
-    side.offset = y + signed_inflow + signed_outflow
+    side.offset = _sum_vectors(y, signed_inflow, signed_outflow)
+    side.uses = frozenset({"Y", "inflows", "outflows"})
     side.equation = (
         f"x = row_sum(Z) + row_sum(Y) + outflow ({outflow_label}) "
         f"- inflow ({inflow_label})"
@@ -227,9 +240,7 @@ def _resolve_input(
     if v is None:
         side.reason = v_reason or "V is unavailable"
         return side
-    adjustment, reason, source, note = resolve_input_adjustment(io, n=n)
-    if source is not None:
-        plan.input_adjustment_source = source
+    adjustment, reason, _source, note = resolve_input_adjustment(io, n=n)
     if note:
         plan.notes.append(note)
 
@@ -241,7 +252,7 @@ def _resolve_input(
         )
         return side
     if representation == "complete":
-        if source is not None:
+        if _source is not None:
             side.reason = (
                 "input-side adjustment was supplied but input_representation='complete'; "
                 "the adjustment's relationship to V is ambiguous"
@@ -250,17 +261,16 @@ def _resolve_input(
         side.available = True
         side.offset = v
         side.equation = "x = column_sum(Z) + column_sum(V)"
+        side.uses = frozenset({"V"})
         return side
     if representation == "adjustments_required":
         if adjustment is None:
             side.reason = reason or "input_adjustments are unavailable"
             return side
-        plan.input_adjustment = adjustment
-        plan.input_adjustment_applied = True
-        plan.input_adjustments_used = source == "input_adjustments"
         side.available = True
-        side.offset = v + adjustment
+        side.offset = _sum_vectors(v, adjustment)
         side.equation = "x = column_sum(Z) + column_sum(V) + input_adjustment"
+        side.uses = frozenset({"V", "input_adjustments"})
         return side
     side.reason = f"unsupported input_representation={representation!r}"
     return side
@@ -280,15 +290,8 @@ def compile_accounting_plan(
     """Resolve all declared accounting inputs exactly once."""
 
     plan = AccountingPlan(
-        x=np.asarray(x, dtype=float).reshape(-1) if x is not None else None,
         tolerance=normalize_tolerance(tolerance),
-        convention=convention,
     )
-    if convention is None:
-        reason = "AccountingConvention was not supplied"
-        plan.output.reason = reason
-        plan.input.reason = reason
-        return plan
     z_shape = _shape_of(z) if z is not None else ()
     if (
         z is None
@@ -325,6 +328,11 @@ def compile_accounting_plan(
         plan.notes.append(y_reason)
     if v_reason and plan.v is None:
         plan.notes.append(v_reason)
+    if convention is None:
+        reason = "AccountingConvention was not supplied"
+        plan.output.reason = reason
+        plan.input.reason = reason
+        return plan
     plan.output = _resolve_output(
         io,
         y=plan.y,

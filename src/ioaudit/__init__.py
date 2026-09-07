@@ -6,6 +6,7 @@ from .exceptions import IOAuditError, IONumericalError, IOValidationError
 from .file_diagnostics import DelimitedFileReport, inspect_csv, inspect_delimited
 from .model import IOSystem, TradeFlows
 from .results import AuditReport
+from ._version import __version__
 
 __all__ = [
     "IOSystem",
@@ -20,5 +21,3 @@ __all__ = [
     "IOValidationError",
     "IONumericalError",
 ]
-
-__version__ = "0.1.0"

@@ -14,6 +14,16 @@ from .conventions import AccountingConvention
 from .exceptions import IOValidationError
 
 
+_TRADE_FLOW_FIELDS = (
+    "interregional_inflows",
+    "international_imports",
+    "interregional_outflows",
+    "international_exports",
+    "combined_inflows",
+    "combined_outflows",
+)
+
+
 def _copy_value(value: Any, name: str, *, allow_none: bool = True) -> Any:
     if value is None and allow_none:
         return None
@@ -57,14 +67,7 @@ class TradeFlows:
     combined_outflows: Any = None
 
     def __post_init__(self) -> None:
-        for name in (
-            "interregional_inflows",
-            "international_imports",
-            "interregional_outflows",
-            "international_exports",
-            "combined_inflows",
-            "combined_outflows",
-        ):
+        for name in _TRADE_FLOW_FIELDS:
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, _copy_value(value, name))
@@ -90,14 +93,7 @@ class TradeFlows:
 
         return any(
             getattr(self, name) is not None
-            for name in (
-                "interregional_inflows",
-                "international_imports",
-                "interregional_outflows",
-                "international_exports",
-                "combined_inflows",
-                "combined_outflows",
-            )
+            for name in _TRADE_FLOW_FIELDS
         )
 
 
@@ -152,7 +148,7 @@ class IOSystem:
             self.metadata = {}
         else:
             try:
-                self.metadata = dict(metadata)
+                self.metadata = copy.deepcopy(dict(metadata))
             except (TypeError, ValueError) as exc:
                 raise IOValidationError("metadata must be a mapping") from exc
         self.accounting = accounting

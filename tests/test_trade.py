@@ -51,7 +51,7 @@ def test_outflows_in_y_uses_only_inflows():
     )
     report = audit(IOSystem(z, x, ["a", "b"], Y=f, V=v, trade=TradeFlows(combined_inflows=inflow), accounting=convention))
     assert report.accounting.output_balance.max_relative_residual == 0
-    assert report.accounting.outflows_used is False
+    assert "outflows" not in report.accounting.output_balance.uses
 
 
 def test_unknown_trade_representation_skips_output_balance():

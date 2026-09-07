@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import csv
 from collections import Counter
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field
 import io
 import json
 from pathlib import Path
@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .exceptions import IOValidationError
+from ._serialization import flatten as _flatten, jsonable as _jsonable
 
 
 _DELIMITER_CANDIDATES = (",", ";", "\t", "|")
@@ -34,34 +35,6 @@ _INVISIBLE = {
     "\u200d": "ZERO_WIDTH_JOINER",
     "\u00a0": "NO_BREAK_SPACE",
 }
-
-
-def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, np.ndarray):
-        return _jsonable(value.tolist())
-    if isinstance(value, np.generic):
-        return _jsonable(value.item())
-    return value
-
-
-def _flatten(value: Any, prefix: str, rows: list[dict[str, Any]]) -> None:
-    if is_dataclass(value):
-        for field in fields(value):
-            _flatten(getattr(value, field.name), f"{prefix}.{field.name}" if prefix else field.name, rows)
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            _flatten(item, f"{prefix}.{key}" if prefix else str(key), rows)
-    elif isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            _flatten(item, f"{prefix}[{index}]", rows)
-    else:
-        rows.append({"path": prefix, "value": value})
 
 
 @dataclass

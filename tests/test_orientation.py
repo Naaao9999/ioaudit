@@ -136,7 +136,7 @@ def test_orientation_comparison_respects_accounting_tolerance():
     )
     assert report.accounting.output_balance.residual_class == "rounding_level"
     assert report.orientation.comparison_available is True
-    assert report.orientation.possible_transpose is None
+    assert report.orientation.possible_transpose is False
 
 
 def test_x_label_mismatch_fails_orientation_and_pipeline():
