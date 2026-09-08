@@ -141,7 +141,12 @@ def _same_labels(left: list[Any] | None, right: list[Any] | None) -> bool | None
         return None
     if len(left) != len(right):
         return False
-    return all(a == b for a, b in zip(left, right))
+    if any(_is_missing(label) for label in (*left, *right)):
+        return False
+    try:
+        return all(a == b for a, b in zip(left, right))
+    except (TypeError, ValueError):
+        return False
 
 
 def _normalize_label(value: Any) -> str:
@@ -160,6 +165,11 @@ def _normalized_labels(labels: list[Any] | None) -> list[str] | None:
 def _same_normalized_labels(
     left: list[Any] | None, right: list[Any] | None
 ) -> bool | None:
+    # Missing labels must not become valid identifiers such as the string
+    # "<NA>" through normalization.
+    if left is not None and right is not None:
+        if any(_is_missing(label) for label in (*left, *right)):
+            return False
     normalized_left = _normalized_labels(left)
     normalized_right = _normalized_labels(right)
     return _same_labels(normalized_left, normalized_right)
@@ -190,6 +200,7 @@ def _core_inputs_are_safe(result: Any) -> bool:
         not ({"Z", "x"} & set(result.details.get("nan_fields", []))),
         not ({"Z", "x"} & set(result.details.get("inf_fields", []))),
         result.duplicate_sector_ids is not True,
+        not bool(result.details.get("missing_sector_id_indices")),
         not bool(result.details.get("core_normalized_duplicates")),
         _alignment_is_safe(
             result.row_column_labels_match,
@@ -492,7 +503,10 @@ def _sum_similarity(
         candidate = _dimension_vector(value, axis, index)
         if total is None:
             total = _axis_sum_for_total(value, axis)
-        others = total - candidate
+        if not np.isfinite(candidate).all() or not np.isfinite(total).all():
+            return None
+        with np.errstate(over="raise", invalid="raise"):
+            others = total - candidate
         scale = float(
             max(
                 np.max(np.abs(candidate)) if candidate.size else 0.0,
@@ -503,42 +517,46 @@ def _sum_similarity(
             return 1.0
         candidate_scaled = candidate / scale
         others_scaled = others / scale
-        denominator = float(np.linalg.norm(candidate_scaled))
-        difference = float(np.linalg.norm(candidate_scaled - others_scaled))
+        with np.errstate(over="raise", invalid="raise", divide="raise"):
+            denominator = float(np.linalg.norm(candidate_scaled))
+            difference = float(np.linalg.norm(candidate_scaled - others_scaled))
         if denominator == 0.0:
             return 1.0 if difference == 0.0 else 0.0
-        return max(0.0, 1.0 - difference / denominator)
+        similarity = 1.0 - difference / denominator
+        return max(0.0, similarity) if np.isfinite(similarity) else None
     except (TypeError, ValueError, FloatingPointError):
         return None
 
 
 def _axis_sum_for_total(value: Any, axis: int) -> np.ndarray:
-    summed = value.sum(axis=axis) if hasattr(value, "sum") else np.asarray(value, dtype=float).sum(axis=axis)
+    with np.errstate(over="raise", invalid="raise"):
+        summed = value.sum(axis=axis) if hasattr(value, "sum") else np.asarray(value, dtype=float).sum(axis=axis)
     return np.asarray(summed, dtype=float).reshape(-1)
 
 
-def _total_candidates(value: Any, labels: list[Any] | None, axis: int) -> list[dict[str, Any]]:
+def _total_candidates(
+    value: Any, labels: list[Any] | None, axis: int, *, numeric_value: Any,
+) -> list[dict[str, Any]]:
     shape = _shape_of(value)
     size = shape[0] if axis == 0 else shape[1]
     candidates: list[dict[str, Any]] = []
     total: np.ndarray | None = None
-    if _all_finite(value):
+    # Use the numeric validation already performed by structure diagnostics.
+    # Object arrays can contain Inf even though their dtype is not numeric.
+    if numeric_value is not None and _all_finite(numeric_value):
         try:
             # Compute the aggregate once. Recomputing it for every candidate
             # makes total-row/column screening unnecessarily expensive.
-            total = _axis_sum_for_total(value, axis)
+            total = _axis_sum_for_total(numeric_value, axis)
         except (TypeError, ValueError, FloatingPointError):
             total = None
     for index in range(size):
         label = labels[index] if labels is not None and index < len(labels) else None
         label_evidence = _normalized_total_label(label)
-        similarity = _sum_similarity(value, axis, index, total) if total is not None else None
-        try:
-            nonzero_candidate = bool(
-                np.any(_dimension_vector(value, axis, index) != 0)
-            )
-        except (TypeError, ValueError, FloatingPointError):
-            nonzero_candidate = False
+        similarity = _sum_similarity(numeric_value, axis, index, total) if total is not None else None
+        nonzero_candidate = similarity is not None and bool(
+            np.any(_dimension_vector(numeric_value, axis, index) != 0)
+        )
         sum_evidence = similarity is not None and similarity >= 0.999 and nonzero_candidate
         if not label_evidence and not sum_evidence:
             continue
@@ -746,6 +764,9 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.duplicate_sector_ids = True
 
     expected_sector_labels = list(io.sectors) if result.n_rows == len(io.sectors) else None
+    result.details["missing_sector_id_indices"] = [
+        index for index, label in enumerate(io.sectors) if _is_missing(label)
+    ]
     z_index, z_columns = _labels(io.Z)
     result.row_column_labels_match = _same_labels(z_index, z_columns)
     result.normalized_row_column_labels_match = _same_normalized_labels(z_index, z_columns)
@@ -1020,10 +1041,10 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     result.details["supporting_warnings"] = result.supporting_warnings
     if len(z_shape) == 2:
         result.possible_total_rows = _total_candidates(
-            io.Z, _dimension_labels(io, 0, z_shape[0]), axis=0
+            io.Z, _dimension_labels(io, 0, z_shape[0]), axis=0, numeric_value=z_numeric
         )
         result.possible_total_columns = _total_candidates(
-            io.Z, _dimension_labels(io, 1, z_shape[1]), axis=1
+            io.Z, _dimension_labels(io, 1, z_shape[1]), axis=1, numeric_value=z_numeric
         )
         result.possible_total_vector = _possible_total_vector(io, z_shape)
         row_labels = _dimension_labels(io, 0, z_shape[0])
@@ -1066,6 +1087,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         bool(result.nan_exists),
         bool(result.inf_exists),
         result.duplicate_sector_ids is True,
+        bool(result.details.get("missing_sector_id_indices")),
         not _alignment_is_safe(
             result.row_column_labels_match,
             result.normalized_row_column_labels_match,

@@ -246,7 +246,7 @@ class AuditReport:
         thresholds: dict[str, float] | None = None,
         fail_on_boolean: bool = True,
         max_relative_residual: float | None = None,
-        max_spectral_radius: float | None = 1.0,
+        max_spectral_radius: float | None | object = _MISSING,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
         fail_on_invalid_reference: bool = False,
@@ -257,8 +257,13 @@ class AuditReport:
         active = dict(self.thresholds)
         supplied = dict(thresholds or {})
         active.update(supplied)
-        if max_spectral_radius is not None and "stability.spectral_radius" not in supplied:
-            active["stability.spectral_radius"] = max_spectral_radius
+        if "stability.spectral_radius" not in supplied:
+            if max_spectral_radius is _MISSING:
+                active.setdefault("stability.spectral_radius", 1.0)
+            elif max_spectral_radius is None:
+                active.pop("stability.spectral_radius", None)
+            else:
+                active["stability.spectral_radius"] = max_spectral_radius
         if max_relative_residual is not None:
             active["accounting.max_relative_residual"] = max_relative_residual
 
@@ -277,7 +282,7 @@ class AuditReport:
         self,
         fail_on_boolean: bool = True,
         max_relative_residual: float | None = None,
-        max_spectral_radius: float = 1.0,
+        max_spectral_radius: float | None | object = _MISSING,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
         fail_on_invalid_reference: bool = False,
@@ -291,6 +296,9 @@ class AuditReport:
 
         ``fail_on_invalid_reference=True`` explicitly includes an invalid
         optional reference matrix in the boolean gate.
+
+        An omitted spectral bound uses the saved bound, or 1.0 when none is
+        saved. An explicit value overrides it; None disables that bound.
         """
 
         failures, thresholds = self._gate_failures(
@@ -302,7 +310,7 @@ class AuditReport:
             fail_on_invalid_reference=fail_on_invalid_reference,
             raise_invalid=True,
         )
-        self.thresholds.update(thresholds)
+        self.thresholds = dict(thresholds)
         self._sync_provenance()
         if failures:
             raise IOAuditError("IO audit failed: " + "; ".join(failures))
@@ -313,7 +321,7 @@ class AuditReport:
         *,
         fail_on_boolean: bool = True,
         max_relative_residual: float | None = None,
-        max_spectral_radius: float | None = 1.0,
+        max_spectral_radius: float | None | object = _MISSING,
         require_complete: bool = False,
         require_available: Iterable[str] | None = None,
         fail_on_invalid_reference: bool = False,
@@ -325,6 +333,10 @@ class AuditReport:
         sides and downstream numerical diagnostics must be available.
         Set ``fail_on_invalid_reference=True`` to include an invalid optional
         reference matrix in the boolean gate.
+
+        Spectral bounds take precedence in this order: ``thresholds`` entries,
+        explicit arguments, saved bounds, then the default 1.0. None explicitly
+        disables the spectral bound. This predicate does not change the report.
         """
 
         failures, _ = self._gate_failures(

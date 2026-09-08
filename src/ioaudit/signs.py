@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .structure import _as_array, _is_sparse, _labels
+from .structure import _is_sparse, _labels, _numeric_array
 
 
 @dataclass
@@ -37,15 +37,18 @@ def _negative(value: Any, name: str, row_labels: list[Any] | None = None, col_la
     if value is None:
         return result
     try:
+        numeric_value, bad = _numeric_array(value)
+        if numeric_value is None or bad:
+            return result
         if _is_sparse(value):
-            coo = value.tocoo()
+            coo = numeric_value.tocoo()
             entries = [
                 (int(row), int(column), float(item))
                 for row, column, item in zip(coo.row, coo.col, np.asarray(coo.data))
                 if np.isfinite(item) and item < 0
             ]
         else:
-            array = _as_array(value).astype(float)
+            array = np.asarray(numeric_value, dtype=float)
             entries = [
                 (tuple(int(i) for i in index), float(array[tuple(index)]))
                 for index in np.argwhere(np.isfinite(array) & (array < 0))

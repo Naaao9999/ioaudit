@@ -107,8 +107,11 @@ def _sparse_distribution(matrix: Any) -> dict[str, float | int | None]:
         with np.errstate(over="ignore", invalid="ignore"):
             mean = float(scale * mean_scaled)
             std = float(scale * np.sqrt(variance_scaled))
-    minimum = min(0.0, float(np.min(nonzero))) if nonzero.size else 0.0
-    maximum = max(0.0, float(np.max(nonzero))) if nonzero.size else 0.0
+    minimum = float(np.min(nonzero)) if nonzero.size else 0.0
+    maximum = float(np.max(nonzero)) if nonzero.size else 0.0
+    if nonzero.size < total:
+        minimum = min(0.0, minimum)
+        maximum = max(0.0, maximum)
     return {
         "count": total,
         "min": minimum,
@@ -190,14 +193,14 @@ def diagnose_coefficients(
         return result
     try:
         x_array = np.asarray(x, dtype=float)
-        inverse_x = np.divide(
-            1.0,
-            x_array,
-            out=np.zeros(len(x_array), dtype=float),
-            where=x_array != 0,
-        )
         if _is_sparse(z):
-            a = z.multiply(inverse_x).tocsr()
+            a = z.tocsr(copy=True)
+            a.sum_duplicates()
+            denominators = x_array[a.indices]
+            a.data = np.divide(
+                a.data, denominators, out=np.zeros_like(a.data),
+                where=denominators != 0,
+            )
         else:
             a = np.zeros(z_shape, dtype=float)
             np.divide(z, x_array[np.newaxis, :], out=a, where=x_array[np.newaxis, :] != 0)
