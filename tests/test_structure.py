@@ -1,8 +1,60 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import sparse
 
 from ioaudit import AccountingConvention, IOSystem, audit
+from ioaudit.structure import diagnose_structure
+
+
+@pytest.mark.parametrize("bad_value", [np.inf, -np.inf, np.nan])
+@pytest.mark.parametrize("storage", ["dense", "object_frame", "sparse"])
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+def test_nonfinite_total_screening_keeps_only_label_evidence(bad_value, storage):
+    values = np.array([[1., bad_value], [2., 3.]])
+    labels = ["A", "Total"]
+    if storage == "object_frame":
+        z = pd.DataFrame(values, index=labels, columns=labels, dtype=object)
+    elif storage == "sparse":
+        z = sparse.csr_matrix(values)
+    else:
+        z = values
+    io = IOSystem(z, [10., 10.], labels)
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        report = audit(io)
+    assert report.structure.status == "FAIL"
+    assert report.coefficients.status == report.stability.status == "SKIPPED"
+    for candidates in (report.structure.possible_total_rows,
+                       report.structure.possible_total_columns):
+        assert len(candidates) == 1
+        assert candidates[0]["label"] == "Total"
+        assert candidates[0]["label_evidence"] is True
+        assert candidates[0]["sum_similarity"] is None
+    actual = io.Z.toarray() if sparse.issparse(io.Z) else np.asarray(io.Z, dtype=float)
+    np.testing.assert_array_equal(actual, values)
+
+
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+def test_unreadable_numeric_values_preserve_total_label_evidence():
+    io = IOSystem(pd.DataFrame([[1., "bad"], [2., 3.]],
+                              index=["A", "Total"], columns=["A", "Total"]),
+                  [10., 10.], ["A", "Total"])
+    report = audit(io)
+    assert report.structure.status == "FAIL"
+    assert report.structure.possible_total_rows[0]["sum_similarity"] is None
+    assert report.structure.possible_total_columns[0]["sum_similarity"] is None
+
+
+@pytest.mark.parametrize("storage", ["dense", "sparse"])
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+def test_total_screening_with_overflowing_sum_is_indeterminate(storage):
+    values = np.full((2, 2), 1e308)
+    z = sparse.csr_matrix(values) if storage == "sparse" else values
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result, _ = diagnose_structure(IOSystem(z, [1e308, 1e308], ["A", "Total"]))
+    for candidates in (result.possible_total_rows, result.possible_total_columns):
+        assert len(candidates) == 1
+        assert candidates[0]["sum_similarity"] is None
 
 
 def test_structure_passes(normal_io):

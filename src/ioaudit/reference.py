@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from .structure import _as_array, _labels, _numeric_array
+from .structure import _as_array, _labels, _numeric_array, _same_labels
 
 
 @dataclass
@@ -46,8 +46,8 @@ def _label_consistency(reference: Any, target: Any, sectors: list[Any]) -> bool 
     return (
         len(ref_index) == len(expected_index)
         and len(ref_columns) == len(expected_columns)
-        and all(a == b for a, b in zip(ref_index, expected_index))
-        and all(a == b for a, b in zip(ref_columns, expected_columns))
+        and _same_labels(ref_index, expected_index)
+        and _same_labels(ref_columns, expected_columns)
     )
 
 
@@ -67,20 +67,34 @@ def _compare(calculated: np.ndarray | None, reference: Any, target: Any, sectors
         return result
     ref_array = _as_array(ref)
     result.reference = ref_array
-    if calculated is None:
-        result.reason = "calculated matrix is unavailable"
-        return result
-    calculated_array = _as_array(calculated)
+    calculated_array = _as_array(calculated) if calculated is not None else None
     result.calculated = calculated_array
-    result.shape_consistency = tuple(calculated_array.shape) == tuple(ref_array.shape)
+    expected_shape = (len(sectors), len(sectors))
+    result.shape_consistency = tuple(ref_array.shape) == expected_shape
     result.label_consistency = _label_consistency(reference, target, sectors)
     if not result.shape_consistency:
         result.status = "FAIL"
-        result.reason = "reference and calculated matrix shapes differ"
+        result.reason = "reference shape does not match the sector dimensions"
         return result
-    if not np.isfinite(ref_array).all() or not np.isfinite(calculated_array).all():
+    if result.label_consistency is False:
         result.status = "FAIL"
-        result.reason = "reference or calculated matrix contains NaN/Inf"
+        result.difference_class = "label_mismatch"
+        result.reason = "reference labels do not match the sector axes"
+        return result
+    if not np.isfinite(ref_array).all():
+        result.status = "FAIL"
+        result.reason = "reference contains NaN/Inf"
+        return result
+    if calculated_array is None:
+        result.reason = "calculated matrix is unavailable"
+        return result
+    if tuple(calculated_array.shape) != expected_shape:
+        result.status = "FAIL"
+        result.reason = "calculated matrix shape does not match the sector dimensions"
+        return result
+    if not np.isfinite(calculated_array).all():
+        result.status = "FAIL"
+        result.reason = "calculated matrix contains NaN/Inf"
         return result
     with np.errstate(over="ignore", invalid="ignore"):
         difference = calculated_array - ref_array
@@ -120,10 +134,7 @@ def _compare(calculated: np.ndarray | None, reference: Any, target: Any, sectors
             <= np.finfo(float).eps * np.maximum(1.0, np.abs(ref_array))
         )
     )
-    if result.label_consistency is False:
-        result.status = "FAIL"
-        result.difference_class = "label_mismatch"
-    elif exact:
+    if exact:
         result.status = "PASS"
         result.difference_class = "exact"
     else:

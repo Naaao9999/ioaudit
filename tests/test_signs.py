@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 
 from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
 
@@ -40,3 +41,16 @@ def test_negative_tradeflows_are_reported_and_list_y_is_safe():
     )
     assert report.signs.negative_inflows.count == 1
     assert report.signs.negative_outflows.count == 1
+
+
+def test_complex_values_do_not_leak_cast_warnings():
+    io = IOSystem(
+        np.array([[1.0 + 1.0j]]),
+        np.array([1.0]),
+        ["a"],
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        report = audit(io)
+    assert report.structure.non_numeric is True
+    assert report.signs.negative_transaction_cells.count == 0

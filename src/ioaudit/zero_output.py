@@ -56,8 +56,11 @@ def diagnose_zero_output(
     if not _all_finite(z) or not _all_finite(x):
         return result
     if _is_sparse(z):
-        row_indices = [int(i) for i in range(z_shape[0]) if z.getrow(i).nnz == 0]
-        column_indices = [int(i) for i in range(z_shape[1]) if z.getcol(i).nnz == 0]
+        numeric = z.copy()
+        numeric.sum_duplicates()
+        numeric.eliminate_zeros()
+        row_indices = [int(i) for i in range(z_shape[0]) if numeric.getrow(i).nnz == 0]
+        column_indices = [int(i) for i in range(z_shape[1]) if numeric.getcol(i).nnz == 0]
     else:
         array = np.asarray(z, dtype=float)
         row_indices = [int(i) for i in np.flatnonzero(np.all(array == 0, axis=1))]
@@ -79,7 +82,7 @@ def diagnose_zero_output(
     for index in indices:
         sector = sectors[index] if index < len(sectors) else index
         if _is_sparse(z):
-            is_zero_column = not np.any(z.getcol(index).data != 0)
+            is_zero_column = not np.any(numeric.getcol(index).data != 0)
         else:
             is_zero_column = bool(np.all(z[:, index] == 0))
         if is_zero_column:

@@ -199,6 +199,12 @@ for candidate in report.scale.possible_cell_scale_errors:
 
 ここで報告される候補は修正値ではなく、残差がどの程度改善するかにもとづく診断上の証拠です。`ioaudit` が入力値を書き換えることはありません。
 
+### 内部恒等式で識別できない共通倍率
+
+`Z`、`x`、`Y`、`V` のすべてが同じ倍率で読み取られている場合、その倍率間違いはIO表内部の数値だけでは識別できません。この場合、会計恒等式は保たれ、技術係数 `A` と Leontief 逆行列 `L` も変わらないため、`report.scale` に候補が出ないことがあります。
+
+したがって、`unit` の正しさは公表資料の単位表記や外部の絶対額と照合してください。`metadata` は単位情報の有無を記録しますが、単位そのものの正しさを自動判定しません。`ioaudit` はこのケースで単位を推測したり、値を再スケールしたりしません。
+
 ## 会計規約
 
 会計恒等式は、表の意味が明示されている場合だけ評価します。
@@ -493,6 +499,8 @@ report.raise_for_status(
 
 `report.passed()` と `report.raise_for_status()` は同じ判定ルールを利用します。既定ではスペクトル半径に `1.0` の上限を適用し、任意の診断が利用できないという理由だけでは失敗にしません。
 
+スペクトル半径の上限は、`passed(thresholds=...)` 内の指定、今回の `max_spectral_radius`、レポートに保存済みの上限、既定値 `1.0` の順で優先します。`raise_for_status()` は適用した閾値をレポートと provenance に保存し、以後の引数なしの判定もその閾値を使います。`max_spectral_radius=None` を明示すると、その呼び出しではスペクトル半径の上限を適用しません。`passed()` は保存済み設定を変更しません。
+
 投入側・産出側の両方の会計診断と、その後の数値診断が利用可能であることを要求する場合は、次を使用します。
 
 ```python
@@ -768,6 +776,12 @@ for candidate in report.scale.possible_cell_scale_errors:
 ```
 
 A scale candidate is diagnostic evidence, not a correction. `ioaudit` never applies the suggested factor to the source data.
+
+#### Common scale factors are not identifiable from internal identities
+
+If `Z`, `x`, `Y`, and `V` are all read with the same incorrect scale factor, the error cannot be identified from the internal IO values alone. The accounting identities still hold, and both the technical coefficient matrix `A` and the Leontief inverse `L` remain unchanged. In that situation, `report.scale` may contain no candidate.
+
+Check the declared `unit` against the source documentation or an external absolute-value reference. The metadata diagnostic records whether unit information is present; it does not verify that the declared unit is correct. `ioaudit` does not infer the unit or rescale the input automatically.
 
 ## Accounting conventions
 
@@ -1064,6 +1078,8 @@ report.raise_for_status(
 ```
 
 `report.passed()` and `report.raise_for_status()` use the same gate rules. By default, a spectral-radius limit of `1.0` is applied, while optional diagnostics do not fail merely because they are unavailable.
+
+Spectral-radius limits take precedence in this order: an entry in `passed(thresholds=...)`, an explicit `max_spectral_radius` argument, a saved report limit, then the default `1.0`. `raise_for_status()` saves the applied thresholds in the report and provenance; subsequent calls without arguments reuse them. Explicitly passing `max_spectral_radius=None` disables the spectral bound for that call. `passed()` does not change saved settings.
 
 Use `require_complete=True` when both accounting sides and downstream numerical diagnostics must be available:
 
