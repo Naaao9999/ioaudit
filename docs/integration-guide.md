@@ -11,7 +11,7 @@
     ↓  利用者のadapter / parser
 Z, x, Y, V, sectors の切り出し
     ↓  資料に基づく意味の確認
-AccountingConvention / TradeFlows / input_adjustments
+AccountingConvention / TradeFlows / input_adjustments / output_adjustments
     ↓
 IOSystem
     ↓
@@ -26,7 +26,7 @@ report の確認・CI gate
 | --- | --- | --- |
 | 元データ取得 | Excel、CSV、統計APIなどから取得 | 取得しない |
 | 表の切り出し | `Z`、`x`、`Y`、`V`、部門ラベルを特定 | 自動抽出しない |
-| 意味の確認 | 国内取引か総取引か、交易の格納方法、符号、`V` の完全性を資料で確認 | 推測しない |
+| 意味の確認 | 国内取引か総取引か、交易の格納方法、符号、`V` の完全性、産出側調整の有無を資料で確認 | 推測しない |
 | Python化 | NumPy配列、pandas DataFrame等へ変換 | 受け取った値を変更しない |
 | IOSystem構築 | `IOSystem(...)` を作成 | 構造を保持する |
 | 監査 | `audit(io)` を呼び出す | 診断結果を返す |
@@ -153,6 +153,52 @@ assert report.accounting.input_balance.status == "PASS"
 
 `TradeFlows` の交易ベクトルと `input_adjustments` は別の概念です。産品別・供給側の流入を、購入部門別の投入調整として自動的に再利用しません。
 
+## 4. 購入者価格表と産出側調整
+
+購入者価格表などで、`Y` と交易フローに加えて商業マージン、運輸マージン、税、輸入調整などを産出側の別項目として持つ場合は、`output_adjustments` にまとめて渡します。各値は会計式へ直接加える符号付き値として、利用者が資料に基づいて作成します。`ioaudit` は生産者価格への変換や符号の推測を行いません。
+
+```python
+import numpy as np
+import pandas as pd
+
+from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
+
+sectors = ["A", "B"]
+Z = np.array([[10.0, 2.0], [3.0, 8.0]])
+Y = np.array([[8.0], [7.0]])
+V = np.array([[5.0, 8.0]])
+imports = np.array([1.0, 1.0])
+output_adjustments = pd.DataFrame(
+    [[-1.0], [1.0]],
+    index=sectors,
+    columns=["value-added tax adjustment"],
+)
+x = np.array([18.0, 18.0])
+
+accounting = AccountingConvention.domestic_competitive(
+    inflow_sign="positive",
+    trade_representation="outflows_in_Y",
+    external_flow_scope="international",
+    input_representation="complete",
+    output_representation="adjustments_required",
+)
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    V=V,
+    trade=TradeFlows(international_imports=imports),
+    output_adjustments=output_adjustments,
+    accounting=accounting,
+)
+report = audit(io)
+assert report.accounting.output_balance.status == "PASS"
+```
+
+`output_adjustments` は `(n,)` または行が部門・列が調整項目の `(n, k)` です。`output_representation="adjustments_required"` でブロックがない場合、形状・ラベルが不正な場合、または小計候補がある場合は、産出側会計を `SKIPPED` にします。`TradeFlows` と同じ輸入・輸出項目を重ねた場合や、項目ラベルがなく交易との重複を排除できない場合も、安全のため使用しません。
+
 ## 会計規約の選び方
 
 presetが確定するのは、名前から直接分かる範囲だけです。
@@ -172,12 +218,13 @@ presetが確定するのは、名前から直接分かる範囲だけです。
 - `external_flow_scope`: 国際交易、地域間交易、または両方か
 - `inflow_sign` / `outflow_sign`: 正の金額か、符号付きベクトルか
 - `input_representation`: `V` だけで投入側が閉じるか、`input_adjustments` が必要か
+- `output_representation`: `Y` と交易だけで産出側が閉じるか、`output_adjustments` が必要か
 
 不明な項目は `"unknown"` のままにしてください。影響する診断は `SKIPPED` になります。
 
 ## ラベルと向き
 
-`Z` の行・列、`x`、`Y` の行、`V` の列、交易ベクトル、`input_adjustments` の購入部門列は `sectors` と同じ順序で用意します。
+`Z` の行・列、`x`、`Y` の行、`V` の列、交易ベクトル、`input_adjustments` の購入部門列、`output_adjustments` の行は `sectors` と同じ順序で用意します。
 
 - 完全一致ならそのまま使用します。
 - Unicodeや空白の正規化後だけ一致する場合は、値を指定順序で使用し、警告を記録します。

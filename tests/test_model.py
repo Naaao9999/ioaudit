@@ -1,7 +1,8 @@
 import numpy as np
+import pandas as pd
 import pytest
 
-from ioaudit import AccountingConvention, IOSystem, TradeFlows
+from ioaudit import AccountingConvention, IOSystem, TradeFlows, audit
 from ioaudit.exceptions import IOValidationError
 
 
@@ -32,6 +33,31 @@ def test_model_deep_copies_nested_metadata():
     metadata["source"]["name"] = "changed"
     metadata["tags"].append("changed")
     assert io.metadata == {"source": {"name": "table"}, "tags": ["official"]}
+
+
+def test_country_sector_tuple_identifiers_are_supported():
+    sectors = [("JPN", "Agriculture"), ("CHN", "Agriculture")]
+    z = np.array([[1.0, 0.2], [0.1, 2.0]])
+    x = np.array([2.0, 3.0])
+    io = IOSystem(
+        pd.DataFrame(z, index=sectors, columns=sectors),
+        pd.Series(x, index=sectors),
+        sectors,
+        Y=pd.DataFrame([[0.8], [0.9]], index=sectors, columns=["final demand"]),
+        V=pd.DataFrame([[0.9, 0.8]], index=["value added"], columns=sectors),
+        accounting=AccountingConvention(
+            transaction_scope="domestic",
+            import_treatment="none",
+            trade_representation="embedded",
+            input_representation="complete",
+        ),
+    )
+    report = audit(io)
+    assert report.structure.status == "PASS"
+    assert report.structure.z_row_labels_match_sectors is True
+    assert report.structure.z_column_labels_match_sectors is True
+    assert report.structure.x_labels_match is True
+    assert report.coefficients.status == "PASS"
 
 
 def test_tradeflows_and_audit_do_not_mutate_source_arrays(normal_data):

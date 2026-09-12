@@ -65,7 +65,22 @@ def _canonical(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_canonical(item) for item in value]
     if isinstance(value, np.generic):
-        return _canonical(value.item())
+        # ``longdouble.item()`` may return another NumPy scalar rather than a
+        # Python scalar.  Recursing through ``item()`` therefore never reaches
+        # the JSON-compatible branches on some NumPy versions.  Explicitly
+        # normalize numeric scalar families instead.
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value)
+        if np.issubdtype(value.dtype, np.integer):
+            return int(value)
+        if np.issubdtype(value.dtype, np.floating):
+            if value.dtype.itemsize > np.dtype(float).itemsize:
+                return {"dtype": str(value.dtype), "value": str(value)}
+            return _canonical(float(value))
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return str(value)
+        item = value.item()
+        return item if not isinstance(item, np.generic) else str(value)
     if isinstance(value, (pd.Timestamp, pd.Timedelta)):
         return str(value)
     if isinstance(value, float):
@@ -98,6 +113,7 @@ def input_hash(io: Any) -> str:
         "A_reference": _canonical(getattr(io, "A_reference", None)),
         "L_reference": _canonical(getattr(io, "L_reference", None)),
         "input_adjustments": _canonical(getattr(io, "input_adjustments", None)),
+        "output_adjustments": _canonical(getattr(io, "output_adjustments", None)),
         "trade": trade_payload,
         "metadata": _canonical(getattr(io, "metadata", None)),
         "accounting": _canonical(

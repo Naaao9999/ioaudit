@@ -191,6 +191,7 @@ def _core_inputs_are_safe(result: Any) -> bool:
     """Return whether Z, x, and the sector axis are safe for derived math."""
 
     required = (
+        result.n_rows is not None and result.n_rows > 0,
         result.z_is_2d == PASS,
         result.z_is_square == PASS,
         result.x_length_matches == PASS,
@@ -428,10 +429,13 @@ class StructureDiagnostics:
     normalized_v_labels_match: bool | None = None
     input_adjustment_labels_match: bool | None = None
     normalized_input_adjustment_labels_match: bool | None = None
+    output_adjustment_labels_match: bool | None = None
+    normalized_output_adjustment_labels_match: bool | None = None
     trade_labels_match: dict[str, bool | None] = field(default_factory=dict)
     normalized_trade_labels_match: dict[str, bool | None] = field(default_factory=dict)
     y_shape: str = SKIPPED
     v_shape: str = SKIPPED
+    output_adjustment_shape: str = SKIPPED
     possible_total_rows: list[dict[str, Any]] = field(default_factory=list)
     possible_total_columns: list[dict[str, Any]] = field(default_factory=list)
     possible_total_vector: list[dict[str, Any]] = field(default_factory=list)
@@ -640,6 +644,8 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
 
     result.n_rows = int(z_shape[0]) if len(z_shape) >= 1 else None
     result.n_columns = int(z_shape[1]) if len(z_shape) >= 2 else None
+    if len(z_shape) == 2 and z_shape[0] == 0:
+        result.details["empty_table"] = True
     result.z_is_2d = PASS if len(z_shape) == 2 else FAIL
     result.z_is_square = (
         PASS if len(z_shape) == 2 and z_shape[0] == z_shape[1] else FAIL
@@ -839,6 +845,17 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.normalized_input_adjustment_labels_match = _same_normalized_labels(
             sector_labels, expected_sector_labels
         )
+    value = getattr(io, "output_adjustments", None)
+    if value is not None and expected_sector_labels is not None:
+        field_index, _field_columns = _labels(value)
+        # Rows identify sectors; columns, when present, identify adjustment
+        # components and are intentionally not compared with sector labels.
+        result.output_adjustment_labels_match = _same_labels(
+            field_index, expected_sector_labels
+        )
+        result.normalized_output_adjustment_labels_match = _same_normalized_labels(
+            field_index, expected_sector_labels
+        )
     exact_label_checks = [
         value
         for value in (
@@ -903,6 +920,15 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.duplicate_labels_after_normalization.extend(
             _duplicate_normalized_labels(field_index, "input_adjustments.index")
         )
+    output_index, output_columns = _labels(getattr(io, "output_adjustments", None))
+    if output_index is not None:
+        result.duplicate_labels_after_normalization.extend(
+            _duplicate_normalized_labels(output_index, "output_adjustments.index")
+        )
+    if output_columns is not None:
+        result.duplicate_labels_after_normalization.extend(
+            _duplicate_normalized_labels(output_columns, "output_adjustments.columns")
+        )
 
     core_dimensions = {
         "Z.index",
@@ -921,6 +947,8 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     supporting_dimensions = {
         "input_adjustments.columns",
         "input_adjustments.index",
+        "output_adjustments.index",
+        "output_adjustments.columns",
     }
     core_normalized_duplicates = [
         duplicate
@@ -956,6 +984,11 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         ("x labels / sectors", result.x_labels_match, result.normalized_x_labels_match),
         ("Y labels / sectors", result.y_labels_match, result.normalized_y_labels_match),
         ("V labels / sectors", result.v_labels_match, result.normalized_v_labels_match),
+        (
+            "output_adjustments row labels / sectors",
+            result.output_adjustment_labels_match,
+            result.normalized_output_adjustment_labels_match,
+        ),
     ):
         if exact is False and normalized is True:
             normalized_label_warnings.append(
@@ -967,8 +1000,11 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
     # part of the core Z/x/Y/V table.  Keep their failures local so a bad
     # supporting vector does not prevent coefficients or stability from being
     # audited for an otherwise valid core table.
-    supporting_present = value is not None or (
-        trade is not None and trade.has_any
+    output_value = getattr(io, "output_adjustments", None)
+    supporting_present = (
+        value is not None
+        or output_value is not None
+        or (trade is not None and trade.has_any)
     )
     supporting_failures: list[str] = []
     supporting_warnings: list[str] = []
@@ -1001,6 +1037,39 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
             and result.normalized_input_adjustment_labels_match is not True
         ):
             supporting_failures.append("input_adjustments labels do not match sectors")
+
+    if output_value is not None:
+        output_array, output_bad = _numeric_array(output_value)
+        if output_bad or output_array is None:
+            supporting_failures.append(
+                "output_adjustments contains non-numeric values"
+            )
+        elif result.n_rows is not None:
+            output_shape = _shape_of(output_array)
+            output_shape_valid = output_shape == (result.n_rows,) or (
+                len(output_shape) == 2 and output_shape[0] == result.n_rows
+            )
+            result.output_adjustment_shape = PASS if output_shape_valid else FAIL
+            if not output_shape_valid:
+                supporting_failures.append(
+                    "output_adjustments must have shape (n,) or (n, k)"
+                )
+            if not _all_finite(output_array):
+                supporting_failures.append("output_adjustments contains NaN/Inf")
+        if (
+            result.output_adjustment_labels_match is False
+            and result.normalized_output_adjustment_labels_match is True
+        ):
+            supporting_warnings.append(
+                "output_adjustments row labels match sectors only after Unicode/whitespace normalization"
+            )
+        elif (
+            result.output_adjustment_labels_match is False
+            and result.normalized_output_adjustment_labels_match is not True
+        ):
+            supporting_failures.append(
+                "output_adjustments row labels do not match sectors"
+            )
 
     for qualified_name, exact in result.trade_labels_match.items():
         normalized = result.normalized_trade_labels_match.get(qualified_name)
@@ -1079,6 +1148,7 @@ def diagnose_structure(io: IOSystem) -> tuple[StructureDiagnostics, dict[str, An
         result.v_shape = FAIL if io.V is not None else SKIPPED
 
     required_failures = [
+        result.n_rows == 0,
         result.z_is_2d == FAIL,
         result.z_is_square == FAIL,
         result.x_length_matches == FAIL,

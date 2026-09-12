@@ -1,4 +1,4 @@
-"""Diagnostics for subtotal components in final demand and value added."""
+"""Diagnostics for subtotal components in accounting component blocks."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def _is_subtotal_label(label: Any) -> bool:
 
 @dataclass
 class ComponentsDiagnostics:
-    """Possible subtotal components that can make ``Y`` or ``V`` double-counted."""
+    """Possible subtotal components in Y, V, or output-side adjustments."""
 
     status: str = "SKIPPED"
     subtotal_candidates: list[dict[str, Any]] = field(default_factory=list)
@@ -177,7 +177,7 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
         array = np.asarray(_as_array(value), dtype=float)
     except (TypeError, ValueError, FloatingPointError):
         return []
-    if len(shape) != 2 or not _all_finite(value):
+    if len(shape) != 2 or 0 in shape or not _all_finite(value):
         return []
     size = shape[axis]
     nonzero = np.any(array != 0, axis=1 - axis)
@@ -254,11 +254,15 @@ def _candidates(value: Any, *, field_name: str, axis: int) -> list[dict[str, Any
 
 
 def diagnose_components(io: Any) -> ComponentsDiagnostics:
-    """Inspect Y/V component dimensions without removing subtotal columns or rows."""
+    """Inspect accounting component dimensions without removing subtotals."""
 
     result = ComponentsDiagnostics()
     available = False
-    for field_name, value, axis in (("Y", getattr(io, "Y", None), 1), ("V", getattr(io, "V", None), 0)):
+    for field_name, value, axis in (
+        ("Y", getattr(io, "Y", None), 1),
+        ("V", getattr(io, "V", None), 0),
+        ("output_adjustments", getattr(io, "output_adjustments", None), 1),
+    ):
         if value is None:
             continue
         try:

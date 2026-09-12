@@ -11,6 +11,14 @@ FLOW_SIGNS = frozenset({"negative", "positive", "unknown"})
 TRADE_REPRESENTATIONS = frozenset({"embedded", "outflows_in_Y", "separate", "unknown"})
 EXTERNAL_FLOW_SCOPES = frozenset({"international", "interregional", "both", "unknown"})
 INPUT_REPRESENTATIONS = frozenset({"complete", "adjustments_required", "unknown"})
+OUTPUT_REPRESENTATIONS = frozenset({"complete", "adjustments_required", "unknown"})
+
+
+def _validate_choice(value: object, allowed: frozenset[str], message: str) -> None:
+    """Raise the public validation error for a malformed choice value."""
+
+    if not isinstance(value, str) or value not in allowed:
+        raise IOValidationError(message)
 
 
 @dataclass(frozen=True)
@@ -20,15 +28,21 @@ class AccountingConvention:
     ``ioaudit`` records this declaration and never infers import treatment
     merely from the presence of an imports vector.  The plain constructor is
     deliberately conservative: omitted semantic fields become ``"unknown"``
-    and affected accounting checks are skipped.  For a domestic table,
+    and affected accounting checks are skipped.  The
+    ``output_representation`` default of ``"complete"`` preserves the
+    existing convention that no separate output-adjustment block is declared;
+    use ``"unknown"`` when that relationship is not known.  For a domestic table,
     competitive imports are interpreted according to ``inflow_sign``:
     ``negative`` means the supplied vector is ``-M`` and is added to the
     output identity, ``positive`` means it is ``M`` and is subtracted, and
     ``unknown`` disables that adjusted check.  ``input_representation``
     declares whether ``V`` is complete, requires an explicit user-specific
-    adjustment, or is unknown.  Noncompetitive treatment requires explicit
-    sector vectors for both imports and exports.  Missing or unspecified
-    information causes the affected check to be SKIPPED rather than guessed.
+    adjustment, or is unknown.  ``output_representation`` declares whether
+    no separate signed row-side adjustment is expected, or whether an
+    explicit ``IOSystem.output_adjustments`` block is required.
+    Noncompetitive treatment requires explicit sector vectors for both
+    imports and exports.  Missing or unspecified information causes the
+    affected check to be SKIPPED rather than guessed.
     """
 
     transaction_scope: str = "unknown"
@@ -38,36 +52,49 @@ class AccountingConvention:
     inflow_sign: str = "unknown"
     outflow_sign: str = "unknown"
     input_representation: str = "unknown"
+    output_representation: str = "complete"
 
     def __post_init__(self) -> None:
-        if self.transaction_scope not in TRANSACTION_SCOPES:
-            raise IOValidationError(
-                "transaction_scope must be 'domestic', 'total', or 'unknown'"
-            )
-        if self.import_treatment not in IMPORT_TREATMENTS:
-            raise IOValidationError(
-                "import_treatment must be 'competitive', 'noncompetitive', 'none', or 'unknown'"
-            )
-        if self.trade_representation not in TRADE_REPRESENTATIONS:
-            raise IOValidationError(
-                "trade_representation must be 'embedded', 'outflows_in_Y', 'separate', or 'unknown'"
-            )
-        if self.external_flow_scope not in EXTERNAL_FLOW_SCOPES:
-            raise IOValidationError(
-                "external_flow_scope must be 'international', 'interregional', 'both', or 'unknown'"
-            )
-        if self.inflow_sign not in FLOW_SIGNS:
-            raise IOValidationError(
-                "inflow_sign must be 'negative', 'positive', or 'unknown'"
-            )
-        if self.outflow_sign not in FLOW_SIGNS:
-            raise IOValidationError(
-                "outflow_sign must be 'negative', 'positive', or 'unknown'"
-            )
-        if self.input_representation not in INPUT_REPRESENTATIONS:
-            raise IOValidationError(
-                "input_representation must be 'complete', 'adjustments_required', or 'unknown'"
-            )
+        _validate_choice(
+            self.transaction_scope,
+            TRANSACTION_SCOPES,
+            "transaction_scope must be 'domestic', 'total', or 'unknown'",
+        )
+        _validate_choice(
+            self.import_treatment,
+            IMPORT_TREATMENTS,
+            "import_treatment must be 'competitive', 'noncompetitive', 'none', or 'unknown'",
+        )
+        _validate_choice(
+            self.trade_representation,
+            TRADE_REPRESENTATIONS,
+            "trade_representation must be 'embedded', 'outflows_in_Y', 'separate', or 'unknown'",
+        )
+        _validate_choice(
+            self.external_flow_scope,
+            EXTERNAL_FLOW_SCOPES,
+            "external_flow_scope must be 'international', 'interregional', 'both', or 'unknown'",
+        )
+        _validate_choice(
+            self.inflow_sign,
+            FLOW_SIGNS,
+            "inflow_sign must be 'negative', 'positive', or 'unknown'",
+        )
+        _validate_choice(
+            self.outflow_sign,
+            FLOW_SIGNS,
+            "outflow_sign must be 'negative', 'positive', or 'unknown'",
+        )
+        _validate_choice(
+            self.input_representation,
+            INPUT_REPRESENTATIONS,
+            "input_representation must be 'complete', 'adjustments_required', or 'unknown'",
+        )
+        _validate_choice(
+            self.output_representation,
+            OUTPUT_REPRESENTATIONS,
+            "output_representation must be 'complete', 'adjustments_required', or 'unknown'",
+        )
 
     @property
     def name(self) -> str:
@@ -84,6 +111,7 @@ class AccountingConvention:
         external_flow_scope: str = "unknown",
         outflow_sign: str = "unknown",
         input_representation: str = "unknown",
+        output_representation: str = "complete",
     ) -> "AccountingConvention":
         """Return a domestic competitive-import convention.
 
@@ -102,6 +130,7 @@ class AccountingConvention:
             inflow_sign=inflow_sign,
             outflow_sign=outflow_sign,
             input_representation=input_representation,
+            output_representation=output_representation,
         )
 
     @classmethod
@@ -113,6 +142,7 @@ class AccountingConvention:
         inflow_sign: str = "unknown",
         outflow_sign: str = "unknown",
         input_representation: str = "unknown",
+        output_representation: str = "complete",
     ) -> "AccountingConvention":
         """Return a domestic noncompetitive-import convention.
 
@@ -129,6 +159,7 @@ class AccountingConvention:
             inflow_sign=inflow_sign,
             outflow_sign=outflow_sign,
             input_representation=input_representation,
+            output_representation=output_representation,
         )
 
     @classmethod
@@ -150,6 +181,7 @@ class AccountingConvention:
             inflow_sign="unknown",
             outflow_sign="unknown",
             input_representation="unknown",
+            output_representation="complete",
         )
 
     def to_dict(self) -> dict[str, str]:
@@ -163,5 +195,6 @@ class AccountingConvention:
             "inflow_sign": self.inflow_sign,
             "outflow_sign": self.outflow_sign,
             "input_representation": self.input_representation,
+            "output_representation": self.output_representation,
             "name": self.name,
         }

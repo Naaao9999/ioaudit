@@ -11,6 +11,7 @@ from ._balance_core import (
     inflow_adjustment,
     normalize_tolerance,
     outflow_adjustment,
+    output_adjustment_vector,
     resolve_input_adjustment,
     trade_side,
     vector,
@@ -37,6 +38,7 @@ class AccountingPlan:
 
     y: np.ndarray | None = None
     v: np.ndarray | None = None
+    output_adjustment: np.ndarray | None = None
     output: BalanceSidePlan = field(
         default_factory=lambda: BalanceSidePlan(axis=1)
     )
@@ -83,6 +85,79 @@ def _validated_component(
     return vector(value, expected=field_name, n=n, sectors=sectors)
 
 
+_OUTPUT_TRADE_LABELS = frozenset(
+    {
+        "imports",
+        "international imports",
+        "imports of goods and services",
+        "interregional inflows",
+        "combined inflows",
+        "移入",
+        "輸入",
+        "移輸入",
+        "exports",
+        "international exports",
+        "exports of goods and services",
+        "interregional outflows",
+        "combined outflows",
+        "移出",
+        "輸出",
+        "移輸出",
+    }
+)
+
+
+def _output_adjustment_component_labels(value: Any) -> list[Any] | None:
+    """Return semantic component labels for a two-dimensional adjustment block."""
+
+    if value is None:
+        return None
+    columns = getattr(value, "columns", None)
+    if columns is None:
+        return None
+    labels = list(columns)
+    return labels if labels and all(isinstance(label, str) for label in labels) else None
+
+
+def _output_adjustment_trade_conflict(io: Any, value: Any) -> str | None:
+    """Reject ambiguous overlap between output adjustments and trade flows."""
+
+    trade = getattr(io, "trade", None)
+    if trade is None or not trade.has_any or value is None:
+        return None
+    labels = _output_adjustment_component_labels(value)
+    if labels is None:
+        return (
+            "output_adjustments were supplied with TradeFlows but their "
+            "component labels are unavailable; possible trade double-counting "
+            "cannot be ruled out"
+        )
+    from .structure import _normalize_label
+
+    normalized = {_normalize_label(label) for label in labels}
+    overlaps = sorted(normalized & _OUTPUT_TRADE_LABELS)
+    if overlaps:
+        return (
+            "output_adjustments overlap with declared trade component(s): "
+            + ", ".join(overlaps)
+        )
+    return None
+
+
+def _append_output_adjustment(
+    side: BalanceSidePlan,
+    adjustment: np.ndarray | None,
+) -> BalanceSidePlan:
+    """Add a validated signed output adjustment to an available identity."""
+
+    if adjustment is None or not side.available:
+        return side
+    side.offset = _sum_vectors(side.offset, adjustment)
+    side.uses = frozenset((*side.uses, "output_adjustments"))
+    side.equation = f"{side.equation} + output_adjustments (signed)"
+    return side
+
+
 def _resolve_output(
     io: Any,
     *,
@@ -92,11 +167,32 @@ def _resolve_output(
     n: int,
     sectors: list[Any],
     plan: AccountingPlan,
+    output_adjustment: np.ndarray | None,
+    output_adjustment_reason: str | None,
 ) -> BalanceSidePlan:
     side = BalanceSidePlan(axis=1)
     if y is None:
         side.reason = y_reason or "Y is unavailable"
         return side
+
+    output_representation = convention.output_representation
+    raw_output_adjustment = getattr(io, "output_adjustments", None)
+    if output_representation == "unknown":
+        side.reason = "output_representation='unknown'; output-side adjustments are not declared"
+        return side
+    if output_representation == "complete" and raw_output_adjustment is not None:
+        side.reason = (
+            output_adjustment_reason
+            or "output_adjustments were supplied but output_representation='complete'"
+        )
+        return side
+    if output_representation == "adjustments_required":
+        if raw_output_adjustment is None:
+            side.reason = "output_adjustments are required but were not supplied"
+            return side
+        if output_adjustment is None:
+            side.reason = output_adjustment_reason or "output_adjustments are unavailable"
+            return side
 
     representation = convention.trade_representation
     if convention.transaction_scope == "total":
@@ -123,7 +219,7 @@ def _resolve_output(
             plan.notes.append(
                 "trade flows were supplied but excluded by the total transaction scope"
             )
-        return side
+        return _append_output_adjustment(side, output_adjustment)
 
     if convention.transaction_scope == "unknown":
         side.reason = "transaction_scope is unknown"
@@ -156,7 +252,7 @@ def _resolve_output(
             plan.notes.append(
                 "trade flows were supplied but excluded because import_treatment='none'"
             )
-        return side
+        return _append_output_adjustment(side, output_adjustment)
     if representation == "embedded":
         side.available = True
         side.offset = y
@@ -168,7 +264,7 @@ def _resolve_output(
             plan.notes.append(
                 "trade flows were supplied but excluded because trade_representation='embedded'"
             )
-        return side
+        return _append_output_adjustment(side, output_adjustment)
 
     trade = getattr(io, "trade", None)
     inflows, reason, inflow_label = trade_side(
@@ -196,7 +292,7 @@ def _resolve_output(
             else "x = row_sum(Z) + row_sum(Y) - inflow (positive magnitude)"
         )
         plan.notes.append("outflow_sign not applicable")
-        return side
+        return _append_output_adjustment(side, output_adjustment)
     if representation != "separate":
         side.reason = f"unsupported trade_representation={representation!r}"
         return side
@@ -219,11 +315,20 @@ def _resolve_output(
     side.available = True
     side.offset = _sum_vectors(y, signed_inflow, signed_outflow)
     side.uses = frozenset({"Y", "inflows", "outflows"})
-    side.equation = (
-        f"x = row_sum(Z) + row_sum(Y) + outflow ({outflow_label}) "
-        f"- inflow ({inflow_label})"
+    inflow_term = (
+        f"- inflow ({inflow_label}, positive magnitude)"
+        if convention.inflow_sign == "positive"
+        else f"+ inflow ({inflow_label}, negative signed)"
     )
-    return side
+    outflow_term = (
+        f"+ outflow ({outflow_label}, positive magnitude)"
+        if convention.outflow_sign == "positive"
+        else f"- outflow ({outflow_label}, negative signed)"
+    )
+    side.equation = (
+        f"x = row_sum(Z) + row_sum(Y) {outflow_term} {inflow_term}"
+    )
+    return _append_output_adjustment(side, output_adjustment)
 
 
 def _resolve_input(
@@ -324,6 +429,32 @@ def compile_accounting_plan(
         sectors=sectors,
         components=components,
     )
+    output_adjustment_raw = getattr(io, "output_adjustments", None)
+    if _has_component_risk(components, "output_adjustments"):
+        plan.output_adjustment = None
+        output_adjustment_reason = (
+            "output_adjustments contains an ambiguous subtotal or component label"
+        )
+        output_note = None
+    else:
+        plan.output_adjustment, output_adjustment_reason, output_note = output_adjustment_vector(
+            output_adjustment_raw,
+            name="output_adjustments",
+            n=n,
+            sectors=sectors,
+        )
+    if output_note:
+        plan.notes.append(output_note)
+    if output_adjustment_raw is not None:
+        conflict_reason = _output_adjustment_trade_conflict(
+            io, output_adjustment_raw
+        )
+        if conflict_reason:
+            plan.output_adjustment = None
+            output_adjustment_reason = conflict_reason
+            plan.notes.append(conflict_reason)
+        elif plan.output_adjustment is None and output_adjustment_reason:
+            plan.notes.append(output_adjustment_reason)
     if y_reason and plan.y is None:
         plan.notes.append(y_reason)
     if v_reason and plan.v is None:
@@ -341,6 +472,8 @@ def compile_accounting_plan(
         n=n,
         sectors=sectors,
         plan=plan,
+        output_adjustment=plan.output_adjustment,
+        output_adjustment_reason=output_adjustment_reason,
     )
     plan.input = _resolve_input(
         io,
