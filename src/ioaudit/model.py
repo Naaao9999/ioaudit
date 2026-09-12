@@ -117,6 +117,7 @@ class IOSystem:
         *,
         trade: TradeFlows | None = None,
         input_adjustments: Any = None,
+        output_adjustments: Any = None,
         A_reference: Any = None,
         L_reference: Any = None,
         metadata: dict[str, Any] | None = None,
@@ -142,6 +143,7 @@ class IOSystem:
         self.Y = _copy_value(Y, "Y")
         self.V = _copy_value(V, "V")
         self.input_adjustments = _copy_value(input_adjustments, "input_adjustments")
+        self.output_adjustments = _copy_value(output_adjustments, "output_adjustments")
         self.A_reference = _copy_value(A_reference, "A_reference")
         self.L_reference = _copy_value(L_reference, "L_reference")
         self.trade = TradeFlows(**trade.__dict__) if trade is not None else None

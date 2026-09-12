@@ -41,7 +41,9 @@ def _negative(value: Any, name: str, row_labels: list[Any] | None = None, col_la
         if numeric_value is None or bad:
             return result
         if _is_sparse(value):
-            coo = numeric_value.tocoo()
+            coo = numeric_value.tocoo(copy=True)
+            coo.sum_duplicates()
+            coo.eliminate_zeros()
             entries = [
                 (int(row), int(column), float(item))
                 for row, column, item in zip(coo.row, coo.col, np.asarray(coo.data))

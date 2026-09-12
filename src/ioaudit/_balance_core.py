@@ -180,6 +180,58 @@ def input_adjustment_vector(
     return axis_sum(array, 0), None, alignment_note
 
 
+def output_adjustment_vector(
+    value: Any, *, name: str, n: int, sectors: list[Any]
+) -> tuple[np.ndarray | None, str | None, str | None]:
+    """Read signed row-side output adjustments.
+
+    A one-dimensional value is already a sector vector.  For a two-dimensional
+    value, rows identify sectors and columns identify adjustment components;
+    components are summed across columns without changing their supplied
+    signs.  The caller is responsible for declaring whether this block is
+    required by the accounting convention.
+    """
+
+    if value is None:
+        return None, f"{name} was not supplied", None
+    try:
+        array, bad = _numeric_array(value)
+    except Exception as exc:
+        return None, f"{name} could not be read: {exc}", None
+    if array is None or bad or not _all_finite(array):
+        return None, f"{name} contains non-numeric or missing values", None
+
+    labels_index, _labels_columns = _labels(value)
+    shape = _shape_of(array)
+    if len(shape) == 1 and shape == (n,):
+        alignment_labels = labels_index
+    elif len(shape) == 2 and shape[0] == n:
+        alignment_labels = labels_index
+    else:
+        return None, f"{name} must have shape (n,) or (n, k)", None
+
+    alignment_note = None
+    if alignment_labels is not None:
+        exact = _same_labels(alignment_labels, sectors)
+        normalized = _same_normalized_labels(alignment_labels, sectors)
+        if exact is False and normalized is not True:
+            axis = "index"
+            return (
+                None,
+                f"{name} {axis} do not match sectors in order; positional use was skipped",
+                None,
+            )
+        if exact is False and normalized is True:
+            alignment_note = (
+                f"{name} index matches sectors only after Unicode/whitespace normalization; "
+                "values were used in the declared order"
+            )
+
+    if len(shape) == 1:
+        return np.asarray(array, dtype=float), None, alignment_note
+    return axis_sum(array, 1), None, alignment_note
+
+
 def resolve_input_adjustment(
     io: Any, *, n: int
 ) -> tuple[np.ndarray | None, str | None, str | None, str | None]:
@@ -238,6 +290,14 @@ def trade_side(
     ):
         return None, f"combined and split {side} were supplied together", None
     if combined is not None:
+        if scope != "both":
+            return (
+                None,
+                f"trade.{combined_name} represents combined interregional and "
+                f"international flows and is incompatible with "
+                f"external_flow_scope={scope!r}",
+                None,
+            )
         value, reason = aggregate_sector_vector(
             combined, name=f"trade.{combined_name}", n=n, sectors=sectors
         )
@@ -253,7 +313,17 @@ def trade_side(
         if value is None:
             return None, reason, None
         vectors.append(value)
-    return np.sum(vectors, axis=0), None, label
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with np.errstate(over="ignore", invalid="ignore"):
+            combined_value = np.sum(vectors, axis=0)
+    if not np.isfinite(combined_value).all():
+        return (
+            None,
+            f"trade.{side} became non-finite while combining flow components",
+            None,
+        )
+    return combined_value, None, label
 
 
 def inflow_adjustment(raw: np.ndarray, sign: str) -> np.ndarray | None:
@@ -315,6 +385,7 @@ __all__ = [
     "inflow_adjustment",
     "input_adjustment_vector",
     "normalize_tolerance",
+    "output_adjustment_vector",
     "outflow_adjustment",
     "resolve_input_adjustment",
     "trade_side",

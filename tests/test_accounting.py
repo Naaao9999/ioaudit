@@ -136,7 +136,7 @@ def test_noncompetitive_import_accounting_uses_explicit_vectors():
         "outflows",
     }
     assert report.accounting.output_balance.max_absolute_residual == 0
-    assert "inflow (international_imports)" in report.accounting.output_balance.equation
+    assert "inflow (international_imports, positive magnitude)" in report.accounting.output_balance.equation
 
 
 def test_competitive_import_accounting_uses_signed_import_row():

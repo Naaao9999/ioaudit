@@ -15,6 +15,14 @@
 
 問題が見つかっても、`ioaudit` は表を勝手に転置・補正・削除・再スケールしません。診断に必要な情報が不足している場合も、値や会計規約を推測せず `SKIPPED` として扱います。
 
+## AI支援下でも残る入力解釈のリスク
+
+AI支援ツールによって、CSVやExcelの読み込みコード、分析コードを素早く作成できるようになりました。しかし、コード生成だけでは、統計表の意味を確実に確定できません。
+
+どの行・列が `Z`、`x`、`Y`、`V` に対応するのか、合計行・列が含まれていないか、単位や部門順序が整合しているか、輸入・輸出の範囲や符号が何を意味するのかは、元統計の定義に照らして確認する必要があります。
+
+`ioaudit` は、元データの抽出とIO分析の間に機械可読な preflight diagnostics を置き、実行可能ではあるものの意味を取り違えた入力を検出する材料を提供します。解釈と修正は利用者が明示的に行います。
+
 ## できること
 
 - `Z`、`x`、`Y`、`V` の形状、数値型、部門ラベル、並び順を確認
@@ -23,6 +31,7 @@
 - 指定した会計規約に基づいて、投入側・産出側の会計残差を計算
 - `Y` / `V` に小計が混ざって二重計上になっていないかを確認
 - 交易フローや `input_adjustments` を安全に会計計算へ使えるかを確認
+- 購入者価格表などの `output_adjustments` を明示的な産出側調整として監査
 - 技術係数行列 `A`、スペクトル半径、`I - A` の可逆性、条件数、Leontief逆行列を確認
 - `A_reference` / `L_reference` がある場合は、再計算した行列との差を確認
 - 会計残差から、10倍・100倍・1000倍などの桁違い候補を検出
@@ -98,6 +107,7 @@ report.provenance      # 入力hash・実行条件
 - NaN / Inf / 非数値が含まれていないか
 - 行・列・部門ラベルが整合しているか
 - `Y`、`V`、`TradeFlows`、`input_adjustments` の部門軸が整合しているか
+- `output_adjustments` の部門軸、形状、調整項目ラベルが整合しているか
 - 重複ラベルがないか
 - Unicode幅や空白を正規化した後に重複が生じないか
 - 合計行・合計列や非部門項目らしきラベルが `Z` に混入していないか
@@ -125,7 +135,7 @@ report.provenance      # 入力hash・実行条件
 - 最大残差
 - 残差分類
 
-会計式で実際に使用した構成要素は、`input_balance.uses` と `output_balance.uses`（例: `Y`、`V`、`inflows`、`outflows`、`input_adjustments`）で確認できます。
+会計式で実際に使用した構成要素は、`input_balance.uses` と `output_balance.uses`（例: `Y`、`V`、`inflows`、`outflows`、`input_adjustments`、`output_adjustments`）で確認できます。
 
 引数なしの `AccountingConvention()` は、会計上の意味を推測しない保守的な設定です。意味情報が `"unknown"` のままなら、影響する会計診断は `SKIPPED` になります。
 
@@ -217,7 +227,7 @@ from ioaudit import AccountingConvention
 accounting = AccountingConvention()
 ```
 
-`transaction_scope`、`import_treatment`、`trade_representation`、`external_flow_scope`、`inflow_sign`、`outflow_sign`、`input_representation` は既定で `"unknown"` です。該当する会計診断は推測せず `SKIPPED` になります。
+`transaction_scope`、`import_treatment`、`trade_representation`、`external_flow_scope`、`inflow_sign`、`outflow_sign`、`input_representation` は既定で `"unknown"` です。`output_representation` は後方互換のため既定で `"complete"` ですが、産出側の表現が不明な場合は `"unknown"` を明示してください。該当する会計診断は推測せず `SKIPPED` になります。
 
 一般的な会計構造にはプリセットを利用できます。
 
@@ -315,6 +325,39 @@ io = IOSystem(
 
 同じラベル方針は `Z`、`x`、`Y`、`V`、`TradeFlows` にも適用されます。正規化後にも不一致が残る場合は、位置だけを頼りに下流計算を行わず、影響する診断だけを `SKIPPED` にします。`TradeFlows` と `input_adjustments` の不備は、表本体の構造とは分けて `structure.supporting_status` に記録します。
 
+## 産出側表現
+
+購入者価格表などで、`Y` と交易だけでは `x` を説明できず、商業マージン・運輸マージン・税・輸入調整などの産出側項目が別掲されている場合は、`output_adjustments` を指定します。値は会計式にそのまま加算する**符号付き**の調整値です。生産者価格への変換や符号の推測は行いません。
+
+```python
+accounting = AccountingConvention.domestic_competitive(
+    inflow_sign="positive",
+    trade_representation="outflows_in_Y",
+    external_flow_scope="international",
+    input_representation="complete",
+    output_representation="adjustments_required",
+)
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    V=V,
+    trade=TradeFlows(international_imports=imports),
+    output_adjustments=output_adjustments,
+    accounting=accounting,
+)
+```
+
+`output_adjustments` は `(n,)`、または行が部門・列が調整項目の `(n, k)` です。2次元の DataFrame では行ラベルを `sectors` と照合し、列ラベルは調整項目の説明として保持します。`output_representation` の扱いは次のとおりです。
+
+- `"complete"`: 別建ての産出側調整を想定しない。値を渡すと二重計上の可能性として `SKIPPED`。
+- `"adjustments_required"`: 値がない、形状・ラベルが不正、または小計候補がある場合は `SKIPPED`。
+- `"unknown"`: 産出側表現を推測せず `SKIPPED`。
+
+`TradeFlows` と併用する場合、調整項目に輸入・輸出などの交易項目を重ねて指定しないでください。項目ラベルがない状態で交易との重複を排除できない場合も、安全のため `SKIPPED` になります。
+
 ## TradeFlows
 
 全国表・地域表の外部フローは `TradeFlows` で明示します。`imports` / `exports` の個別引数は、v0.1 の `IOSystem` API にはありません。
@@ -387,6 +430,8 @@ io = IOSystem(
 
 参照行列の診断は、完全一致なら `PASS`、数値差はあるものの比較可能なら `AVAILABLE`、shape・label・非数値などの明示的な不整合があれば `FAIL`、参照行列が未指定または計算対象の行列が利用できなければ `SKIPPED` です。
 
+`A_reference` / `L_reference` は、`Z`、`x`、`price_basis`、部門分類と同じ評価基準・順序で作成されたものを指定してください。例えば購入者価格の表に生産者価格で計算した参照行列を渡すと、数値差が検出されても原因を自動判定できません。参照行列の価格基準や単位は利用者が確認し、必要ならメタデータや出典とともに管理します。
+
 任意指定の参照行列が不正でも、既定の `report.passed()` では表本体の判定を失敗させません。参照行列の形式不備を明示的に判定条件へ含める場合は `fail_on_invalid_reference=True` を指定します。数値差そのものを CI の判定条件にする場合は、`reference.A.relative_difference` などに閾値を明示できます。
 
 ## メタデータと provenance
@@ -404,6 +449,8 @@ io = IOSystem(
         "currency": "JPY",
         "price_basis": "producer",
         "valuation": "current",
+        "symmetric_dimension": "industry",
+        "classification": "JSIC",
     },
 )
 ```
@@ -415,6 +462,8 @@ io = IOSystem(
 - `price_basis`
 - `currency`
 - `valuation`
+- `symmetric_dimension` (`"industry"` または `"product"`)
+- `classification`
 
 各監査には `report.provenance` が付き、主に次の情報を記録します。
 
@@ -426,6 +475,8 @@ io = IOSystem(
 - 桁違い診断の設定
 - 適用した閾値
 - 監査実行時刻
+
+`symmetric_dimension` は、`Z` の行・列が産業分類なら `"industry"`、製品分類なら `"product"` とします。例えば産業×産業表では `"industry"` / `"JSIC"`、製品×製品表では `"product"` / `"CPA"` のように、元表の分類体系を利用者が明示します。分類の変換や自動対応付けは行いません。
 
 ## 区切りテキストの事前診断
 
@@ -534,6 +585,8 @@ report = audit(io, numerical_method="auto")
 
 v0.1 は、**単一の対称産業連関表（symmetric input-output table; SIOT）に対する分析前診断**に限定しています。
 
+現在の対応範囲と、価格評価・国×部門識別子・MRIO・SUTなどを今後どの段階で扱うかは [ROADMAP.md](ROADMAP.md) に記録しています。v0.1では `output_adjustments` を含む明示的なSIOT入力を扱い、表形式そのものが異なるMRIO・SUTへの対応や自動的な単位・価格変換は行いません。
+
 供給・使用表（Supply and Use Tables; SUT）は、v0.1 では直接の監査対象ではありません。SUT から対称産業連関表へ変換済みのデータは監査できますが、SUT から IOT への変換自体は `ioaudit` の対象外です。
 
 また、次の機能は提供しません。
@@ -597,6 +650,14 @@ MIT License.
 
 `ioaudit` reports problems and ambiguity, but it does not silently transpose, rebalance, delete, rescale, or otherwise repair the supplied table. When required information is unavailable, the affected diagnostic is reported as `SKIPPED` rather than inferred.
 
+## Input interpretation risks remain with AI-assisted coding
+
+AI-assisted tools make it easier to generate parsing and analysis code quickly. However, code generation alone cannot reliably establish the intended meaning of a statistical table.
+
+Users still need to verify which rows and columns correspond to `Z`, `x`, `Y`, and `V`, whether totals are included, whether units and sector ordering are consistent, and how trade flows are represented and signed.
+
+`ioaudit` places machine-readable preflight diagnostics between source-data extraction and IO analysis. It helps identify inputs that are executable but may be semantically misinterpreted, while keeping interpretation and correction explicit for the user.
+
 ## What it can do
 
 - shape, numeric type, sector labels, and order of `Z`, `x`, `Y`, and `V`
@@ -605,6 +666,7 @@ MIT License.
 - input- and output-side accounting residuals under the declared convention
 - whether subtotal columns or rows in `Y` / `V` may cause double counting
 - whether trade flows and `input_adjustments` are safe to use in accounting checks
+- whether explicit `output_adjustments` are safe to use in the output-side identity
 - technical coefficients `A`, spectral radius, invertibility of `I - A`, condition number, and the Leontief inverse
 - differences between recalculated matrices and `A_reference` / `L_reference`
 - possible 10x, 100x, or 1000x scale errors suggested by accounting residuals
@@ -795,7 +857,7 @@ from ioaudit import AccountingConvention
 accounting = AccountingConvention()
 ```
 
-`transaction_scope`, `import_treatment`, `trade_representation`, `external_flow_scope`, `inflow_sign`, `outflow_sign`, and `input_representation` default to `"unknown"`. Affected accounting checks are therefore `SKIPPED` rather than evaluated under an implicit convention.
+`transaction_scope`, `import_treatment`, `trade_representation`, `external_flow_scope`, `inflow_sign`, `outflow_sign`, and `input_representation` default to `"unknown"`. `output_representation` defaults to `"complete"` for backward compatibility; set it to `"unknown"` when the output-side representation is not known. Affected accounting checks are therefore `SKIPPED` rather than evaluated under an implicit convention.
 
 Explicit presets are available for common accounting structures:
 
@@ -893,6 +955,39 @@ For a two-dimensional `input_adjustments` DataFrame, columns identify purchasing
 
 The same label policy applies to `Z`, `x`, `Y`, `V`, and `TradeFlows`. A mismatch that remains after normalization prevents positional downstream calculations and skips only the affected diagnostics. TradeFlows and input-adjustment issues are recorded in `structure.supporting_status`, separately from the core table structure.
 
+## Output-side representation
+
+For purchaser-price tables and other tables where `Y` and trade flows do not by themselves explain `x`, supply separately reported margins, taxes, or other row-side terms through `output_adjustments`. Values are **signed terms added directly** to the output-side identity. `ioaudit` does not convert purchaser prices to producer prices or infer signs.
+
+```python
+accounting = AccountingConvention.domestic_competitive(
+    inflow_sign="positive",
+    trade_representation="outflows_in_Y",
+    external_flow_scope="international",
+    input_representation="complete",
+    output_representation="adjustments_required",
+)
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    V=V,
+    trade=TradeFlows(international_imports=imports),
+    output_adjustments=output_adjustments,
+    accounting=accounting,
+)
+```
+
+`output_adjustments` accepts `(n,)` or `(n, k)`. In the two-dimensional form, rows identify sectors and columns identify adjustment components. DataFrame row labels are checked against `sectors`; component labels are retained as evidence. The `output_representation` options are:
+
+- `"complete"`: no separate output-side adjustment is declared; supplying one is treated as possible double counting and is `SKIPPED`.
+- `"adjustments_required"`: the output check is `SKIPPED` when the block is missing, malformed, ambiguously labelled, or contains a subtotal candidate.
+- `"unknown"`: the output representation is not inferred and the output check is `SKIPPED`.
+
+When `TradeFlows` is also supplied, do not repeat imports or exports in `output_adjustments`. If component labels are unavailable and trade double counting cannot be ruled out, the output check is conservatively `SKIPPED`.
+
 ## TradeFlows
 
 External and interregional flows are supplied through `TradeFlows`. Separate `imports` / `exports` arguments are not part of the v0.1 `IOSystem` API.
@@ -945,7 +1040,7 @@ Accounting diagnostics are classified as follows:
 - non-zero residual within the declared tolerance: `PASS` + `residual_class="rounding_level"`
 - residual outside the declared tolerance: `FAIL` + `residual_class="outside_tolerance"`
 
-The components used by each accounting identity are available in `input_balance.uses` and `output_balance.uses`, such as `Y`, `V`, `inflows`, `outflows`, and `input_adjustments`.
+The components used by each accounting identity are available in `input_balance.uses` and `output_balance.uses`, such as `Y`, `V`, `inflows`, `outflows`, `input_adjustments`, and `output_adjustments`.
 
 The selected tolerance is stored in provenance. Input values are never modified.
 
@@ -967,6 +1062,8 @@ io = IOSystem(
 
 A reference comparison is `PASS` for exact agreement, `AVAILABLE` for a numerical difference that can be compared, `FAIL` for explicit structural, label, or numeric invalidity, and `SKIPPED` when the reference is not supplied or the calculated matrix is unavailable.
 
+Supply `A_reference` and `L_reference` using the same valuation basis, units, sector classification, and ordering as `Z` and `x`. For example, a producer-price reference matrix should not be interpreted as a purchaser-price reference merely because its shape matches. `ioaudit` reports numerical differences but does not infer their cause; the caller must verify the reference metadata and source documentation.
+
 Invalid optional references do not fail the core `report.passed()` gate by default. Use `fail_on_invalid_reference=True` to include reference validity explicitly. To gate the numerical difference itself, declare a threshold on a path such as `reference.A.relative_difference`.
 
 ## Metadata and provenance
@@ -984,6 +1081,8 @@ io = IOSystem(
         "currency": "JPY",
         "price_basis": "producer",
         "valuation": "current",
+        "symmetric_dimension": "industry",
+        "classification": "JSIC",
     },
 )
 ```
@@ -995,6 +1094,8 @@ The metadata diagnostic checks fields such as:
 - `price_basis`
 - `currency`
 - `valuation`
+- `symmetric_dimension` (`"industry"` or `"product"`)
+- `classification`
 
 Each audit also includes `report.provenance`, which records information such as:
 
@@ -1006,6 +1107,8 @@ Each audit also includes `report.provenance`, which records information such as:
 - scale-diagnostic settings
 - applied thresholds
 - audit timestamp
+
+Set `symmetric_dimension` to `"industry"` when the rows and columns use an industry classification, or to `"product"` for a product classification. For example, an industry-by-industry table may use `"industry"` / `"JSIC"`, while a product-by-product table may use `"product"` / `"CPA"`. The caller declares the source classification; `ioaudit` does not convert or automatically match classifications.
 
 ## File diagnostics
 
@@ -1113,6 +1216,8 @@ With `"auto"`, `ioaudit` selects a dense or iterative numerical route according 
 ## Scope
 
 Version 0.1 focuses on **preflight diagnostics for a single symmetric input-output table (SIOT)**.
+
+The current boundary and the planned stages for price valuation, country-sector identifiers, MRIO, and SUT are recorded in [ROADMAP.md](ROADMAP.md). Version 0.1 accepts explicit SIOT inputs including `output_adjustments`; it does not add MRIO/SUT table models or perform automatic unit or price-basis conversion.
 
 Supply and Use Tables (SUTs) are not directly supported in v0.1. A symmetric input-output table derived from a SUT can be audited, but SUT-to-IOT transformation itself is outside the scope of `ioaudit`.
 

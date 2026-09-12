@@ -176,11 +176,16 @@ def diagnose_coefficients(
         result.reason = "Z or x contains NaN/Inf"
         return result
     zero_columns = np.flatnonzero(x == 0)
+    z_numeric = None
+    if _is_sparse(z):
+        z_numeric = z.tocsr(copy=True)
+        z_numeric.sum_duplicates()
+        z_numeric.eliminate_zeros()
     inconsistent = [
         int(index)
         for index in zero_columns
         if (
-            np.any(z.getcol(int(index)).data != 0)
+            np.any(z_numeric.getcol(int(index)).data != 0)
             if _is_sparse(z)
             else np.any(z[:, int(index)] != 0)
         )
@@ -194,8 +199,7 @@ def diagnose_coefficients(
     try:
         x_array = np.asarray(x, dtype=float)
         if _is_sparse(z):
-            a = z.tocsr(copy=True)
-            a.sum_duplicates()
+            a = z_numeric
             denominators = x_array[a.indices]
             a.data = np.divide(
                 a.data, denominators, out=np.zeros_like(a.data),
