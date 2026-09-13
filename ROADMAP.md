@@ -33,25 +33,26 @@ v0.1公開後は、次の公開入口と入力項目の意味を維持します�
 
 ## 次のアップデート候補
 
-### v0.2：意味情報と識別子の明示化
+### v0.2：意味情報・識別子・別データモデル（開発中）
 
 優先候補は、既存のSIOTモデルを維持したまま、表の意味をより機械可読にする機能です。
 
 - `price_basis` の構造化（`producer`、`purchaser`、`basic`、`unknown` など）
-- ブロックごとの単位、通貨、価格年、為替・PPP基準の記録
 - 国・部門の複合識別子、`region` × `sector` のラベル整合性
+- `SUTSystem` / `audit_sut()`：Supply、Use、commodity×industry、Make、付加価値、最終需要の軸と会計整合性を監査
+- `MRIOSystem` / `audit_mrio()`：国×部門に展開済みの `Z`、tuple/MultiIndexラベル、地域ブロック、埋め込み交易の合計会計を監査
+- sparseなMRIOを含む係数・Leontief系の計算経路を検証
+
+これらは宣言と検証を目的とし、自動換算、自動マッチング、自動分類は行いません。MRIO / SUTの変換、価格評価の変換、交易推計、行列バランシングは別レイヤーの責務とします。
+
+v0.2の初期実装では、SUT・MRIOの入力切り出しや国別ファイルの自動解析は行いません。利用者が公式資料を確認して、明示した軸のブロックを各モデルへ渡します。
+
+### v0.3以降：意味情報と周辺データ
+
+- ブロックごとの単位、通貨、価格年、為替・PPP基準
 - 部門コード、分類体系、crosswalkの整合性診断
 - CO2、雇用、エネルギーなどのsatellite accountの形状・ラベル・単位・欠損診断
-
-これらは宣言と検証を目的とし、自動換算、自動マッチング、自動分類は行いません。
-
-### v0.3以降：別データモデル
-
-データ構造がSIOTと異なるものは、`IOSystem` の引数を増やして対応しません。
-
-- MRIO：国×部門に展開済みの `Z` をまず監査し、将来、地域ブロック・二国間フローを専用モデルで扱う
-- SUT：`SUTSystem` などの別モデルで Supply、Use、commodity×industry を扱う
-- MRIO / SUTの変換、価格評価の変換、交易推計、行列バランシングは別レイヤーの責務とする
+- MRIOの二国間フローやSUT・MRIO変換を専用レイヤーで扱う
 
 ## 実データによる検証方針
 
@@ -103,25 +104,26 @@ After publication, changes are normally limited to bug fixes, documentation, tes
 
 ## Planned updates
 
-### v0.2: explicit semantics and identifiers
+### v0.2: semantics, identifiers, and separate models (in development)
 
 The first candidates add machine-readable meaning while keeping the existing SIOT model:
 
 - structured `price_basis` values such as `producer`, `purchaser`, `basic`, and `unknown`
-- block-level units, currencies, price years, and exchange-rate or PPP bases
 - compound country-sector identifiers and `region` × `sector` alignment
+- `SUTSystem` / `audit_sut()` for Supply, Use, commodity-by-industry, Make, value added, final demand, and their accounting identities
+- `MRIOSystem` / `audit_mrio()` for an already expanded country-by-sector `Z`, tuple/MultiIndex labels, regional blocks, and embedded-flow totals
+- sparse MRIO coefficient and Leontief calculation routes
+
+These additions declare and validate meaning. They do not perform automatic conversion, matching, or classification. MRIO/SUT transformation, price-basis conversion, trade estimation, and matrix balancing belong in separate layers.
+
+The initial v0.2 implementation does not parse country-specific files or extract blocks automatically. The caller is responsible for selecting and documenting the axes before constructing either model.
+
+### v0.3 and later: semantic context and auxiliary data
+
+- block-level units, currencies, price years, and exchange-rate or PPP bases
 - validation of sector codes, classification systems, and crosswalks
 - shape, label, unit, and missing-value diagnostics for satellite accounts such as CO2, employment, and energy
-
-These additions declare and validate meaning. They do not perform automatic conversion, matching, or classification.
-
-### v0.3 and later: separate data models
-
-Data structures that differ from SIOT will not be forced into more `IOSystem` arguments.
-
-- MRIO: first audit an expanded country-by-sector `Z`; later handle regional blocks and bilateral flows in a dedicated model
-- SUT: use a separate model such as `SUTSystem` for Supply, Use, and commodity-by-industry tables
-- MRIO/SUT transformation, price-basis conversion, trade estimation, and matrix balancing belong in separate layers
+- bilateral MRIO flows and SUT/MRIO transformations in dedicated layers
 
 ## Cross-table validation
 

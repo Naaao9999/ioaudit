@@ -5,7 +5,7 @@ from ioaudit import AccountingConvention, AuditReport, IOSystem, TradeFlows, aud
 
 
 def test_v01_public_exports_and_input_contract_are_present():
-    assert {
+    v01_exports = {
         "IOSystem",
         "TradeFlows",
         "AccountingConvention",
@@ -17,7 +17,16 @@ def test_v01_public_exports_and_input_contract_are_present():
         "IOAuditError",
         "IOValidationError",
         "IONumericalError",
-    } == set(ioaudit.__all__)
+    }
+    assert v01_exports <= set(ioaudit.__all__)
+    assert {
+        "SUTSystem",
+        "MRIOSystem",
+        "SUTAuditReport",
+        "MRIOAuditReport",
+        "audit_sut",
+        "audit_mrio",
+    } <= set(ioaudit.__all__)
     assert ioaudit.__version__ == "0.1.0"
 
     io_parameters = inspect.signature(IOSystem).parameters

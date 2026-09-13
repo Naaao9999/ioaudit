@@ -587,9 +587,48 @@ report = audit(io, numerical_method="auto")
 
 v0.1 は、**単一の対称産業連関表（symmetric input-output table; SIOT）に対する分析前診断**に限定しています。
 
-現在の対応範囲と、価格評価・国×部門識別子・MRIO・SUTなどを今後どの段階で扱うかは [ROADMAP.md](ROADMAP.md) に記録しています。v0.1では `output_adjustments` を含む明示的なSIOT入力を扱い、表形式そのものが異なるMRIO・SUTへの対応や自動的な単位・価格変換は行いません。
+現在の安定版APIと、v0.2で追加する別モデルの範囲は [ROADMAP.md](ROADMAP.md) に記録しています。v0.1では `output_adjustments` を含む明示的なSIOT入力を扱い、自動的な単位・価格変換は行いません。
 
-供給・使用表（Supply and Use Tables; SUT）は、v0.1 では直接の監査対象ではありません。SUT から対称産業連関表へ変換済みのデータは監査できますが、SUT から IOT への変換自体は `ioaudit` の対象外です。
+### v0.2開発版の別モデル
+
+開発中のv0.2では、SIOTとは軸と会計式が異なる表を `IOSystem` に押し込めず、専用モデルで監査します。
+
+```python
+from ioaudit import SUTSystem, audit_sut
+
+sut = SUTSystem(
+    use=use,                         # product × industry
+    products=products,
+    industries=industries,
+    make=make,                       # optional product × industry
+    final_demand=final_demand,       # product × final-demand category
+    value_added=value_added,         # value-added component × industry
+    output_by_product=q,
+    output_by_product_scope="domestic_output",
+    output_by_industry=g,
+)
+sut_report = audit_sut(sut)
+```
+
+SUTでは、Useと最終需要から商品産出を、Useと付加価値から産業産出を確認します。`output_by_product_scope` は `domestic_output`、`total_supply`、`unknown` のいずれかを明示します。`make` の行和は国内生産を表すため、`total_supply` または `unknown` の場合は商品別のMake比較を `SKIPPED` とします。SUTからSIOTへの変換は行いません。
+
+```python
+from ioaudit import MRIOSystem, audit_mrio
+
+mrio = MRIOSystem(
+    Z=Z,
+    x=x,
+    regions=["JPN", "USA"],
+    sectors=["agriculture", "manufacturing"],
+    Y=Y,
+    V=V,
+)
+mrio_report = audit_mrio(mrio, numerical_method="auto")
+```
+
+MRIOでは、部門軸を `(region, sector)` の順に展開した行列を受け取ります。クロスリージョン取引は、渡された `Z` と `Y` に埋め込まれているものとして合計会計を確認します。二国間フローの推計や、SUT・MRIOから別形式への変換は扱いません。
+
+これらは次期版の開発中APIです。現行のv0.1 `IOSystem` と `audit()` の契約は維持します。
 
 また、次の機能は提供しません。
 
@@ -1219,9 +1258,48 @@ With `"auto"`, `ioaudit` selects a dense or iterative numerical route according 
 
 Version 0.1 focuses on **preflight diagnostics for a single symmetric input-output table (SIOT)**.
 
-The current boundary and the planned stages for price valuation, country-sector identifiers, MRIO, and SUT are recorded in [ROADMAP.md](ROADMAP.md). Version 0.1 accepts explicit SIOT inputs including `output_adjustments`; it does not add MRIO/SUT table models or perform automatic unit or price-basis conversion.
+The stable API boundary and the separate models planned for v0.2 are recorded in [ROADMAP.md](ROADMAP.md). Version 0.1 accepts explicit SIOT inputs including `output_adjustments`; it does not perform automatic unit or price-basis conversion.
 
-Supply and Use Tables (SUTs) are not directly supported in v0.1. A symmetric input-output table derived from a SUT can be audited, but SUT-to-IOT transformation itself is outside the scope of `ioaudit`.
+### v0.2 development models
+
+The v0.2 development API keeps table structures with different axes and accounting identities separate from `IOSystem`.
+
+```python
+from ioaudit import SUTSystem, audit_sut
+
+sut = SUTSystem(
+    use=use,                         # product x industry
+    products=products,
+    industries=industries,
+    make=make,                       # optional product x industry
+    final_demand=final_demand,       # product x final-demand category
+    value_added=value_added,         # value-added component x industry
+    output_by_product=q,
+    output_by_product_scope="domestic_output",
+    output_by_industry=g,
+)
+sut_report = audit_sut(sut)
+```
+
+For SUTs, the audit checks commodity output from Use plus final demand and industry output from Use plus value added. Set `output_by_product_scope` to `domestic_output`, `total_supply`, or `unknown`. Make row totals are compared with product output only for `domestic_output`; total supply may include imports and is therefore not compared with Make row totals. The audit does not convert a SUT to a SIOT.
+
+```python
+from ioaudit import MRIOSystem, audit_mrio
+
+mrio = MRIOSystem(
+    Z=Z,
+    x=x,
+    regions=["JPN", "USA"],
+    sectors=["agriculture", "manufacturing"],
+    Y=Y,
+    V=V,
+)
+mrio_report = audit_mrio(mrio, numerical_method="auto")
+```
+
+For MRIO, the matrix must already use an expanded `(region, sector)` axis. Cross-region flows are treated as embedded in the supplied `Z` and `Y` blocks for total accounting checks. Bilateral-flow estimation and conversions between SUT, MRIO, and other formats are outside this development API.
+
+These are development APIs for the next version. The v0.1 `IOSystem` and `audit()` contract remains unchanged.
 
 The package also does not provide:
 

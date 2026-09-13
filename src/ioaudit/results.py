@@ -395,3 +395,205 @@ class AuditReport:
             if value is not None:
                 lines.append(f"{label}: {value:.6g}")
         return "\n".join(lines)
+
+
+class SystemAuditReport:
+    """Common serializable report for the v0.2 SUT and MRIO audits.
+
+    SUT and MRIO have different accounting identities from a single SIOT,
+    so they deliberately use a separate report type rather than pretending
+    to be an :class:`AuditReport`.  The report nevertheless exposes the same
+    small operational surface: ``summary``, serialization, and CI gating.
+    """
+
+    def __init__(
+        self,
+        *,
+        system_type: str,
+        structure: Any,
+        accounting: Any,
+        coefficients: Any = None,
+        stability: Any = None,
+        reference: Any = None,
+        metadata: Any = None,
+        methods: Any = None,
+        provenance: dict[str, Any] | None = None,
+        thresholds: dict[str, float] | None = None,
+        warnings: list[str] | None = None,
+        errors: list[str] | None = None,
+    ) -> None:
+        self.system_type = system_type
+        self.structure = structure
+        self.accounting = accounting
+        self.coefficients = coefficients
+        self.stability = stability
+        self.reference = reference
+        self.metadata = metadata
+        self.methods = methods if methods is not None else {}
+        self.provenance = dict(provenance or {})
+        self.thresholds = dict(thresholds or {})
+        self.warnings = list(warnings or [])
+        self.errors = list(errors or [])
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the report as JSON-compatible data."""
+
+        return _jsonable(
+            {
+                "system_type": self.system_type,
+                "structure": self.structure,
+                "accounting": self.accounting,
+                "coefficients": self.coefficients,
+                "stability": self.stability,
+                "reference": self.reference,
+                "metadata": self.metadata,
+                "methods": self.methods,
+                "provenance": self.provenance,
+                "thresholds": self.thresholds,
+                "warnings": self.warnings,
+                "errors": self.errors,
+            }
+        )
+
+    def to_json(self, **kwargs: Any) -> str:
+        """Serialize the report to JSON."""
+
+        options = {"ensure_ascii": False, "indent": 2, "sort_keys": True}
+        options.update(kwargs)
+        return json.dumps(self.to_dict(), **options)
+
+    def to_dataframe(self) -> pd.DataFrame:
+        """Return flattened report values as a DataFrame."""
+
+        rows: list[dict[str, Any]] = []
+        _flatten(self.to_dict(), "", rows, include_empty=True)
+        return pd.DataFrame(rows, columns=["path", "value"])
+
+    @staticmethod
+    def _get_path(root: Any, path: str) -> Any:
+        value = root
+        for part in path.split("."):
+            if not hasattr(value, part):
+                return _MISSING
+            value = getattr(value, part)
+        return value
+
+    def _failures(
+        self,
+        *,
+        thresholds: dict[str, float] | None = None,
+        require_complete: bool = False,
+        fail_on_boolean: bool = True,
+    ) -> list[str]:
+        failures: list[str] = []
+        if fail_on_boolean and getattr(self.structure, "status", None) == "FAIL":
+            failures.append("structure.status")
+        if fail_on_boolean and getattr(self.accounting, "status", None) == "FAIL":
+            failures.append("accounting.status")
+        if fail_on_boolean:
+            for name in ("input_balance", "output_balance"):
+                check = getattr(self.accounting, name, None)
+                if getattr(check, "status", None) == "FAIL":
+                    failures.append(f"accounting.{name}.status")
+        if fail_on_boolean:
+            if getattr(self.coefficients, "status", None) == "FAIL":
+                failures.append("coefficients.status")
+            if getattr(self.stability, "invertible", None) is False:
+                failures.append("stability.invertible")
+            if getattr(self.stability, "status", None) == "FAIL":
+                failures.append("stability.status")
+        if require_complete:
+            for name in ("input_balance", "output_balance"):
+                if getattr(getattr(self.accounting, name, None), "status", None) == "SKIPPED":
+                    failures.append(f"accounting.{name}.status")
+            if getattr(self.accounting, "status", None) == "SKIPPED":
+                failures.append("accounting.status")
+            for name in ("coefficients", "stability"):
+                if getattr(getattr(self, name, None), "status", None) == "SKIPPED":
+                    failures.append(f"{name}.status")
+        active_thresholds = dict(thresholds or {})
+        if self.stability is not None:
+            active_thresholds.setdefault("stability.spectral_radius", 1.0)
+        for path, threshold in active_thresholds.items():
+            value = self._get_path(self, path)
+            if value is _MISSING or value is None:
+                failures.append(f"threshold path unavailable: {path}")
+                continue
+            try:
+                limit = float(threshold)
+                numeric = float(value)
+            except (TypeError, ValueError):
+                failures.append(f"threshold path is not numeric: {path}")
+                continue
+            if not math.isfinite(limit) or not math.isfinite(numeric):
+                failures.append(f"threshold path is non-finite: {path}")
+                continue
+            violated = (
+                numeric >= limit
+                if path.endswith("spectral_radius")
+                else numeric > limit
+            )
+            if violated:
+                failures.append(f"{path}={numeric} exceeds threshold {limit}")
+        return failures
+
+    def passed(
+        self,
+        thresholds: dict[str, float] | None = None,
+        *,
+        require_complete: bool = False,
+        fail_on_boolean: bool = True,
+    ) -> bool:
+        """Return whether this SUT/MRIO report passes the selected gate."""
+
+        return not self._failures(
+            thresholds=thresholds,
+            require_complete=require_complete,
+            fail_on_boolean=fail_on_boolean,
+        )
+
+    def raise_for_status(
+        self,
+        *,
+        thresholds: dict[str, float] | None = None,
+        require_complete: bool = False,
+        fail_on_boolean: bool = True,
+    ) -> None:
+        """Raise :class:`IOAuditError` when the selected gate fails."""
+
+        failures = self._failures(
+            thresholds=thresholds,
+            require_complete=require_complete,
+            fail_on_boolean=fail_on_boolean,
+        )
+        if failures:
+            raise IOAuditError("IO system audit failed: " + "; ".join(failures))
+
+    def summary(self) -> str:
+        """Return a compact summary suitable for interactive inspection."""
+
+        lines = [
+            f"{self.system_type} Audit Report",
+            "===========================",
+            f"Structure                {getattr(self.structure, 'status', 'SKIPPED')}",
+            f"Supporting inputs       {getattr(self.structure, 'supporting_status', 'SKIPPED')}",
+            f"Accounting               {getattr(self.accounting, 'status', 'SKIPPED')}",
+        ]
+        for label, name in (("Input balance", "input_balance"), ("Output balance", "output_balance")):
+            check = getattr(self.accounting, name, None)
+            if check is None:
+                continue
+            lines.append(f"{label:<24} {getattr(check, 'status', 'SKIPPED')}")
+            maximum = getattr(check, "max_relative_residual", None)
+            if maximum is not None:
+                lines.append(f"{label} max rel. residual {maximum:.6g}")
+        if self.coefficients is not None:
+            lines.append(f"Coefficients             {getattr(self.coefficients, 'status', 'SKIPPED')}")
+        if self.stability is not None:
+            lines.append(f"Stability                {getattr(self.stability, 'status', 'SKIPPED')}")
+            rho = getattr(self.stability, "spectral_radius", None)
+            if rho is not None:
+                lines.append(f"Spectral radius          {rho:.6g}")
+        if self.warnings:
+            lines.append(f"Warnings                 {len(self.warnings)}")
+        return "\n".join(lines)

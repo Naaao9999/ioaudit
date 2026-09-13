@@ -36,7 +36,21 @@ def jsonable(value: Any) -> Any:
             "data": jsonable(matrix.data),
         }
     if isinstance(value, np.generic):
-        return jsonable(value.item())
+        # ``longdouble.item()`` can return another NumPy scalar.  Normalize
+        # numeric scalar families explicitly so report serialization cannot
+        # recurse forever on a valid NumPy input type.
+        if np.issubdtype(value.dtype, np.bool_):
+            return bool(value)
+        if np.issubdtype(value.dtype, np.integer):
+            return int(value)
+        if np.issubdtype(value.dtype, np.floating):
+            if value.dtype.itemsize > np.dtype(float).itemsize:
+                return {"dtype": str(value.dtype), "value": str(value)}
+            return float(value)
+        if np.issubdtype(value.dtype, np.complexfloating):
+            return str(value)
+        item = value.item()
+        return item if not isinstance(item, np.generic) else str(value)
     if isinstance(value, float) and not math.isfinite(value):
         return "Infinity" if value > 0 else ("-Infinity" if value < 0 else "NaN")
     if isinstance(value, (str, int, float, bool)) or value is None:

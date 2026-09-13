@@ -254,6 +254,47 @@ report.raise_for_status(
 )
 ```
 
+## v0.2開発版のSUT・MRIO
+
+供給・使用表は `IOSystem` に変換せず、`SUTSystem` へUseとMakeを明示します。Useは商品×産業、最終需要は商品×最終需要項目、付加価値は構成項目×産業として扱います。
+
+```python
+from ioaudit import SUTSystem, audit_sut
+
+sut = SUTSystem(
+    use=use,
+    make=make,
+    products=products,
+    industries=industries,
+    final_demand=final_demand,
+    value_added=value_added,
+    output_by_product=output_by_product,
+    output_by_product_scope="domestic_output",
+    output_by_industry=output_by_industry,
+)
+report = audit_sut(sut)
+```
+
+`audit_sut()` はUseと最終需要から商品産出を、Useと付加価値から産業産出を確認します。`output_by_product_scope` が `domestic_output` のときだけ、Makeの行和を商品別産出と比較します。`total_supply` は輸入を含み得るため、Makeの行和との比較を行いません。SUTからSIOTへの変換や、統計機関ごとのExcel切り出しは行いません。終端行・列を含む未加工の表を渡すと、shape診断で確認できます。
+
+MRIOは国×部門へ展開済みの行列を `MRIOSystem` へ渡します。標準のラベル順は、`regions` の各地域について `sectors` を並べる順です。
+
+```python
+from ioaudit import MRIOSystem, audit_mrio
+
+mrio = MRIOSystem(
+    Z=Z,
+    x=x,
+    regions=["JPN", "USA"],
+    sectors=["agriculture", "manufacturing"],
+    Y=Y,
+    V=V,
+)
+report = audit_mrio(mrio, numerical_method="auto")
+```
+
+`Z`、`x`、`Y`、`V` をpandasで渡す場合は、行・列のMultiIndexを `(region, sector)` の同じ順序に揃えます。MRIOの合計会計では、地域間取引が `Z` と `Y` に埋め込まれているものとして扱います。二国間フローの推計やSUT・MRIO変換は対象外です。
+
 ## ファイル診断との境界
 
 CSV等の区切りテキストは、IOSystemを作る前に診断できます。
@@ -278,3 +319,8 @@ The three examples above cover the intended entry points:
 3. a domestic table with explicit trade flows and user-specific input adjustments.
 
 Use `SKIPPED` as a signal that the relevant information or semantic declaration is missing, and use `require_available` when a downstream analysis requires a particular diagnostic to have run.
+
+The development API also includes `SUTSystem` / `audit_sut()` for explicit
+Supply and Use blocks and `MRIOSystem` / `audit_mrio()` for an already expanded
+country-by-sector matrix. Neither entry point extracts country-specific files
+or converts between SUT, SIOT, and MRIO representations.
