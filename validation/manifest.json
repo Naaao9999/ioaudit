@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "status": "development_validation_manifest",
+  "raw_data_in_repository": false,
+  "entries": [
+    {
+      "name": "japan_meti_estat",
+      "table_form": "long_output_table",
+      "model": "pre-extraction_structure_check",
+      "raw_path": "data_raw/external_validation/meti_2020/japan_2020_iot_108_producer_price.xlsx",
+      "source": "METI/e-Stat",
+      "selection": "Confirm Row Code, Column Code, Special Classification, and valuation columns before selecting a square transaction block.",
+      "result": "The full file is not passed as Z because it is long-form and contains duplicated code pairs from special classifications."
+    },
+    {
+      "name": "united_kingdom_2023",
+      "table_form": "product_by_product_siot",
+      "model": "IOSystem",
+      "raw_path": "data_raw/iot2023product.xlsx",
+      "source": "UK Input-Output Analytical Tables 2023",
+      "selection": "Use the explicitly labelled IOT, A, and Leontief blocks; omit aggregate final-demand totals when component columns are retained.",
+      "result": "Dense and iterative routes, accounting, and reference comparisons were exercised; A was comparable, while the supplied Leontief reference contained missing/non-numeric values and was reported locally as invalid."
+    },
+    {
+      "name": "taiwan_2023",
+      "table_form": "purchaser_price_siot",
+      "model": "IOSystem",
+      "raw_path": "data_raw/f110c08e.xlsx",
+      "source": "Taiwan F110C08e table",
+      "selection": "Confirm the 163-sector row and column headers and explicitly declare purchaser-price treatment and any signed output adjustments.",
+      "result": "The purchaser-price and output-adjustment boundary was exercised without automatic price conversion."
+    },
+    {
+      "name": "korea_2023",
+      "table_form": "producer_price_siot_with_domestic_import_blocks",
+      "model": "IOSystem",
+      "raw_path": "data_raw/2023_Input-Output tables_Producer＇s price_Large-Sized.xlsx",
+      "source": "Korean producer-price input-output tables",
+      "selection": "Keep domestic transactions, imported transactions, total transactions, and reference matrices distinct; pass purchasing-sector import use as input_adjustments.",
+      "result": "Domestic accounting, imported-input adjustment, and A/L reference paths were exercised."
+    },
+    {
+      "name": "united_states_2024",
+      "table_form": "total_requirements_matrix",
+      "model": "file_and_reference_diagnostics",
+      "raw_path": "data_raw/Table.xlsx; data_raw/Table.csv",
+      "source": "US supplied table files",
+      "selection": "Compare the CSV and XLSX matrices and do not treat total requirements as transaction matrix Z.",
+      "result": "The supplied CSV and XLSX values were identical for the 15-sector matrix."
+    },
+    {
+      "name": "oecd_icio_2025",
+      "table_form": "sdmx_long_use_value_added",
+      "model": "SUTSystem_after_explicit_reshape",
+      "raw_path": "data_raw/external_validation/oecd_icio_2025/oecd_sut_useva_2020.csv",
+      "source": "OECD ICIO/SUT SDMX",
+      "selection": "Select P1, P2, B1G and the required region, activity, unit, and valuation dimensions before reshaping.",
+      "result": "The long-form axes and semantic dimensions were inspected; automatic extraction is outside the package."
+    },
+    {
+      "name": "eurostat_figaro_2022",
+      "table_form": "industry_by_industry_siot",
+      "model": "IOSystem",
+      "raw_path": "data_raw/external_validation/eurostat_figaro_2026/naio_10_cp1750_EU27_2022.json",
+      "source": "Eurostat FIGARO",
+      "selection": "Select the documented 65-sector DOM or TOTAL block and the matching P1 output vector.",
+      "result": "TOTAL rho=0.572781 and DOM rho=0.489554; structure, coefficients, and stability checks passed."
+    },
+    {
+      "name": "wiod_japan_2014",
+      "table_form": "country_sut",
+      "model": "SUTSystem",
+      "raw_path": "data_raw/external_validation/wiod_2016/JPN_SUT_nov16.xlsx",
+      "source": "WIOD 2016 release",
+      "selection": "Select 64 products, 64 industries, SUP/USE, final demand, value added, and output vectors.",
+      "result": "With explicit total-supply scope and validation tolerance, the SUT audit passed; the product-side maximum discrepancy was about 112.91 million USD."
+    }
+  ]
+}

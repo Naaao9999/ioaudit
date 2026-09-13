@@ -222,6 +222,20 @@ presetが確定するのは、名前から直接分かる範囲だけです。
 
 不明な項目は `"unknown"` のままにしてください。影響する診断は `SKIPPED` になります。
 
+価格評価は会計規約とは別に、`PriceBasis` で宣言します。
+
+```python
+from ioaudit import PriceBasis
+
+metadata = {
+    "year": 2020,
+    "unit": "million_yen",
+    "price_basis": PriceBasis.PRODUCER,
+}
+```
+
+使用できる値は `PRODUCER`、`PURCHASER`、`BASIC`、`UNKNOWN` です。文字列も互換性のため受け付けます。価格評価の変換や、参照行列の価格基準の推測は行わないため、`A_reference` / `L_reference` の出典と評価基準は利用者が確認します。
+
 ## ラベルと向き
 
 `Z` の行・列、`x`、`Y` の行、`V` の列、交易ベクトル、`input_adjustments` の購入部門列、`output_adjustments` の行は `sectors` と同じ順序で用意します。

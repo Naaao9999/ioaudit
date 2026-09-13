@@ -480,6 +480,27 @@ io = IOSystem(
 
 `symmetric_dimension` は、`Z` の行・列が産業分類なら `"industry"`、製品分類なら `"product"` とします。例えば産業×産業表では `"industry"` / `"JSIC"`、製品×製品表では `"product"` / `"CPA"` のように、元表の分類体系を利用者が明示します。分類の変換や自動対応付けは行いません。
 
+`price_basis` は `PriceBasis` で明示できます。使用できる値は `PRODUCER`、`PURCHASER`、`BASIC`、`UNKNOWN` です。従来どおり文字列も受け付けますが、監査結果では値が検証され、JSONには対応する文字列として保存されます。`UNKNOWN` は明示された不明値として `WARNING` になり、価格基準に依存する診断では推測せず `SKIPPED` になります。
+
+```python
+from ioaudit import IOSystem, PriceBasis, audit
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    metadata={
+        "year": 2020,
+        "unit": "million_yen",
+        "price_basis": PriceBasis.PRODUCER,
+    },
+)
+report = audit(io)
+print(report.metadata.price_basis)
+```
+
+`PriceBasis` は価格基準を記録・検証するための型です。生産者価格と購入者価格の変換、税・マージンの推定、参照行列の価格基準の推測は行いません。`A_reference` / `L_reference` を使う場合は、参照行列も同じ価格基準・単位・部門順で作成されていることを利用者が確認します。
+
 ## 区切りテキストの事前診断
 
 `IOSystem` を構築する前に、`inspect_csv()` / `inspect_delimited()` で区切りテキストを確認できます。結果型は `DelimitedFileReport` です。
@@ -1150,6 +1171,27 @@ Each audit also includes `report.provenance`, which records information such as:
 - audit timestamp
 
 Set `symmetric_dimension` to `"industry"` when the rows and columns use an industry classification, or to `"product"` for a product classification. For example, an industry-by-industry table may use `"industry"` / `"JSIC"`, while a product-by-product table may use `"product"` / `"CPA"`. The caller declares the source classification; `ioaudit` does not convert or automatically match classifications.
+
+Use the `PriceBasis` enum to make the valuation basis machine-readable:
+
+```python
+from ioaudit import IOSystem, PriceBasis, audit
+
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    metadata={
+        "year": 2020,
+        "unit": "million_yen",
+        "price_basis": PriceBasis.PRODUCER,
+    },
+)
+report = audit(io)
+print(report.metadata.price_basis)
+```
+
+The accepted values are `PRODUCER`, `PURCHASER`, `BASIC`, and `UNKNOWN`. Strings remain accepted for compatibility, and serialized reports contain their string values. An explicit `UNKNOWN` is reported as a metadata `WARNING`; diagnostics that depend on the valuation remain `SKIPPED`. `PriceBasis` records and validates the declared valuation; it does not convert producer and purchaser prices, infer taxes or margins, or infer the valuation of a reference matrix. The caller must verify that `A_reference` and `L_reference` use the same valuation, units, classification, and ordering as `Z` and `x`.
 
 ## File diagnostics
 

@@ -2,3 +2,5 @@ include README.md
 include ROADMAP.md
 include LICENSE
 include docs/integration-guide.md
+include validation/README.md
+include validation/manifest.json

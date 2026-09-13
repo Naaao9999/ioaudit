@@ -1,7 +1,7 @@
 import inspect
 
 import ioaudit
-from ioaudit import AccountingConvention, AuditReport, IOSystem, TradeFlows, audit
+from ioaudit import AccountingConvention, AuditReport, IOSystem, PriceBasis, TradeFlows, audit
 
 
 def test_v01_public_exports_and_input_contract_are_present():
@@ -9,6 +9,7 @@ def test_v01_public_exports_and_input_contract_are_present():
         "IOSystem",
         "TradeFlows",
         "AccountingConvention",
+        "PriceBasis",
         "AuditReport",
         "audit",
         "DelimitedFileReport",
@@ -27,7 +28,7 @@ def test_v01_public_exports_and_input_contract_are_present():
         "audit_sut",
         "audit_mrio",
     } <= set(ioaudit.__all__)
-    assert ioaudit.__version__ == "0.1.0"
+    assert ioaudit.__version__ == "0.2.0.dev0"
 
     io_parameters = inspect.signature(IOSystem).parameters
     for name in (

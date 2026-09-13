@@ -6,6 +6,7 @@ from .exceptions import IOAuditError, IONumericalError, IOValidationError
 from .file_diagnostics import DelimitedFileReport, inspect_csv, inspect_delimited
 from .model import IOSystem, TradeFlows
 from .results import AuditReport
+from .semantics import PriceBasis
 from .systems import MRIOAuditReport, MRIOSystem, SUTAuditReport, SUTSystem, audit_mrio, audit_sut
 from ._version import __version__
 
@@ -13,6 +14,7 @@ __all__ = [
     "IOSystem",
     "TradeFlows",
     "AccountingConvention",
+    "PriceBasis",
     "AuditReport",
     "audit",
     "SUTSystem",
