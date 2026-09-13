@@ -61,6 +61,14 @@ v0.1公開後は、次の公開入口と入力項目の意味を維持します�
 - rawデータを配布物へ含めず、wheel・sdist・クリーン環境インストールを公開前に確認する
 - 公開用リポジトリへの反映、リリースタグ作成、PyPI公開は別途承認後に実施する
 
+#### 公開前チェックの現在状況
+
+- 336テスト、`compileall`、wheel・sdist作成、`twine check`、クリーン出力先での配布物検査を完了
+- 英国、韓国、米国のローカル実データ検証をdense・iterative経路で再実行
+- 日本、台湾、OECD、Eurostat、WIODは、rawファイルの所在と抽出条件をマニフェストへ記録済み。各系統の再実行ログ統合を残す
+- Python 3.14を含むCI workflowは設定済み。GitHub Actionsの実行結果確認を残す
+- 公開用リポジトリへの反映、タグ作成、PyPI公開は未実施
+
 これらは宣言と検証を目的とし、自動換算、自動マッチング、自動分類は行いません。MRIO / SUTの変換、価格評価の変換、交易推計、行列バランシングは別レイヤーの責務とします。
 
 v0.2でも、SUT・MRIOの入力切り出しや国別ファイルの自動解析は行いません。利用者が公式資料を確認して、明示した軸のブロックを各モデルへ渡します。
@@ -150,6 +158,14 @@ After publication, changes are normally limited to bug fixes, documentation, tes
 - verify the documented procedure for checking that reference matrices use the same valuation and units as the audited table
 - keep raw validation data out of distributions and verify wheel, sdist, and clean-environment installation
 - reflect the approved release in the public repository, create a release tag, and publish to PyPI only after separate approval
+
+#### Current pre-publication status
+
+- 336 tests, `compileall`, wheel/sdist creation, `twine check`, and distribution inspection in a clean output directory are complete
+- UK, Korea, and US local-data checks were rerun through the dense and iterative routes
+- Japan, Taiwan, OECD, Eurostat, and WIOD file locations and extraction conditions are recorded in the manifest; consolidating rerun logs remains
+- The CI workflow includes Python 3.14; confirmation of the GitHub Actions result remains
+- Public-repository promotion, tagging, and PyPI publication have not been performed
 
 These additions declare and validate meaning. They do not perform automatic conversion, matching, or classification. MRIO/SUT transformation, price-basis conversion, trade estimation, and matrix balancing belong in separate layers.
 
