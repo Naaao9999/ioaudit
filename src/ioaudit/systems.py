@@ -29,6 +29,7 @@ from .results import SystemAuditReport
 from .stability import diagnose_stability
 from .structure import _all_finite, _as_array, _is_sparse, _shape_of, _numeric_array
 from ._version import __version__
+from ._numeric import safe_vector_add, safe_vector_sum
 
 
 @dataclass
@@ -329,30 +330,6 @@ def _validate_value(
     return (array if details["status"] == "PASS" else None), details
 
 
-def _vector_sum(array: np.ndarray, axis: int) -> np.ndarray | None:
-    with np.errstate(over="ignore", invalid="ignore"):
-        if _is_sparse(array):
-            result = np.asarray(array.sum(axis=axis), dtype=float).reshape(-1)
-        else:
-            result = np.sum(array, axis=axis, dtype=float)
-    return result if np.isfinite(result).all() else None
-
-
-def _safe_vector_add(*values: np.ndarray | None) -> np.ndarray | None:
-    """Add derived vectors and return ``None`` when the result is non-finite."""
-
-    if not values or any(value is None for value in values):
-        return None
-    try:
-        with np.errstate(over="ignore", invalid="ignore"):
-            result = np.asarray(values[0], dtype=float).copy()
-            for value in values[1:]:
-                result = result + np.asarray(value, dtype=float)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return result if np.isfinite(result).all() else None
-
-
 def _check_balance(
     actual: np.ndarray | None,
     expected: np.ndarray | None,
@@ -369,45 +346,23 @@ def _check_balance(
         expected_array = np.asarray(expected, dtype=float).reshape(-1)
         with np.errstate(over="ignore", invalid="ignore"):
             residual = actual_array - expected_array
-        absolute = np.abs(residual)
-        relative = np.zeros_like(absolute)
-        denominator = np.abs(expected_array)
-        np.divide(absolute, denominator, out=relative, where=denominator != 0)
-        relative[(denominator == 0) & (absolute != 0)] = np.inf
     except Exception as exc:
         result.reason = f"residual calculation failed: {exc}"
         return result
-    if not np.isfinite(residual).all():
-        result.status = "FAIL"
+    from ._residuals import evaluate_residual
+
+    evaluation = evaluate_residual(residual, expected_array, tolerance)
+    result.residual = evaluation.residual.tolist()
+    result.absolute_residual = evaluation.absolute.tolist()
+    result.relative_residual = evaluation.relative.tolist()
+    result.mae = evaluation.mae
+    result.rmse = evaluation.rmse
+    result.max_absolute_residual = evaluation.max_absolute
+    result.max_relative_residual = evaluation.max_relative
+    result.status = evaluation.status
+    result.residual_class = evaluation.residual_class
+    if result.status == "FAIL" and result.residual_class == "nonfinite":
         result.reason = "derived accounting residual contains NaN or Inf"
-        return result
-    result.residual = residual.tolist()
-    result.absolute_residual = absolute.tolist()
-    result.relative_residual = relative.tolist()
-    result.mae = float(np.mean(absolute)) if absolute.size else 0.0
-    result.rmse = float(np.sqrt(np.mean(residual**2))) if residual.size else 0.0
-    result.max_absolute_residual = float(np.max(absolute)) if absolute.size else 0.0
-    result.max_relative_residual = float(np.max(relative)) if relative.size else 0.0
-    exact = bool(
-        np.all(absolute <= np.finfo(float).eps * np.maximum(1.0, np.abs(expected_array)))
-    )
-    if tolerance is None:
-        result.status = "PASS" if exact else "AVAILABLE"
-        result.residual_class = "exact" if exact else "nonzero"
-        return result
-    absolute_limit = float(tolerance.get("absolute", 0.0))
-    relative_limit = float(tolerance.get("relative", 0.0))
-    rounding_unit = float(tolerance.get("rounding_unit", 0.0))
-    allowed = np.maximum.reduce(
-        [
-            np.full_like(absolute, absolute_limit),
-            relative_limit * np.abs(expected_array),
-            np.full_like(absolute, rounding_unit),
-        ]
-    )
-    within = bool(np.all(absolute <= allowed))
-    result.status = "PASS" if within else "FAIL"
-    result.residual_class = "exact" if exact else ("rounding_level" if within else "outside_tolerance")
     return result
 
 
@@ -508,14 +463,14 @@ def audit_sut(
     accounting = SUTAccountingDiagnostics()
     fd = None
     if final_demand is not None:
-        fd = final_demand if final_demand.ndim == 1 else _vector_sum(final_demand, axis=1)
+        fd = final_demand if final_demand.ndim == 1 else safe_vector_sum(final_demand, axis=1)
     va = None
     if value_added is not None:
-        va = value_added if value_added.ndim == 1 else _vector_sum(value_added, axis=0)
-    use_rows = _vector_sum(use, axis=1) if use is not None else None
-    use_columns = _vector_sum(use, axis=0) if use is not None else None
-    commodity_total = _safe_vector_add(use_rows, fd)
-    industry_total = _safe_vector_add(use_columns, va)
+        va = value_added if value_added.ndim == 1 else safe_vector_sum(value_added, axis=0)
+    use_rows = safe_vector_sum(use, axis=1) if use is not None else None
+    use_columns = safe_vector_sum(use, axis=0) if use is not None else None
+    commodity_total = safe_vector_add(use_rows, fd)
+    industry_total = safe_vector_add(use_columns, va)
     accounting.commodity_balance = _check_balance(
         commodity_total,
         output_p,
@@ -530,7 +485,7 @@ def audit_sut(
     )
     if sut.output_by_product_scope == "domestic_output":
         accounting.make_product_balance = _check_balance(
-            _vector_sum(make, axis=1) if make is not None else None,
+            safe_vector_sum(make, axis=1) if make is not None else None,
             output_p,
             equation="output_by_product = row_sum(make)",
             tolerance=accounting_tolerance,
@@ -545,7 +500,7 @@ def audit_sut(
             ),
         )
     accounting.make_industry_balance = _check_balance(
-        _vector_sum(make, axis=0) if make is not None else None,
+        safe_vector_sum(make, axis=0) if make is not None else None,
         output_i,
         equation="output_by_industry = column_sum(make)",
         tolerance=accounting_tolerance,
@@ -674,20 +629,20 @@ def audit_mrio(
     accounting = MRIOAccountingDiagnostics()
     fd = None
     if y is not None:
-        fd = y if y.ndim == 1 else _vector_sum(y, axis=1)
+        fd = y if y.ndim == 1 else safe_vector_sum(y, axis=1)
     va = None
     if v is not None:
-        va = v if v.ndim == 1 else _vector_sum(v, axis=0)
-    z_rows = _vector_sum(z, axis=1) if z is not None else None
-    z_columns = _vector_sum(z, axis=0) if z is not None else None
+        va = v if v.ndim == 1 else safe_vector_sum(v, axis=0)
+    z_rows = safe_vector_sum(z, axis=1) if z is not None else None
+    z_columns = safe_vector_sum(z, axis=0) if z is not None else None
     accounting.output_balance = _check_balance(
-        _safe_vector_add(z_rows, fd),
+        safe_vector_add(z_rows, fd),
         x,
         equation="x = row_sum(Z) + row_sum(Y)",
         tolerance=accounting_tolerance,
     )
     accounting.input_balance = _check_balance(
-        _safe_vector_add(z_columns, va),
+        safe_vector_add(z_columns, va),
         x,
         equation="x = column_sum(Z) + column_sum(V)",
         tolerance=accounting_tolerance,

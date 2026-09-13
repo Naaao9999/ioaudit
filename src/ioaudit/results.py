@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Iterable
 from typing import Any
@@ -10,10 +9,26 @@ from typing import Any
 import pandas as pd
 
 from .exceptions import IOAuditError
-from ._serialization import flatten as _flatten, jsonable as _jsonable
+from ._report_utils import (
+    MISSING as _MISSING,
+    get_report_path as _get_report_path,
+    report_to_dataframe as _report_to_dataframe,
+    report_to_dict as _report_to_dict,
+    report_to_json as _report_to_json,
+)
 
 
-_MISSING = object()
+_AUDIT_REPORT_FIELDS = (
+    "structure", "orientation", "accounting", "signs", "zero_structure",
+    "coefficients", "stability", "reference", "scale", "components",
+    "metadata", "methods", "provenance", "thresholds", "warnings", "errors",
+)
+
+_SYSTEM_REPORT_FIELDS = (
+    "system_type", "structure", "accounting", "coefficients", "stability",
+    "reference", "metadata", "methods", "provenance", "thresholds",
+    "warnings", "errors",
+)
 
 
 class AuditReport:
@@ -59,40 +74,17 @@ class AuditReport:
     def to_dict(self) -> dict[str, Any]:
         """Return the entire report as a JSON-compatible dictionary."""
 
-        return _jsonable(
-            {
-                "structure": self.structure,
-                "orientation": self.orientation,
-                "accounting": self.accounting,
-                "signs": self.signs,
-                "zero_structure": self.zero_structure,
-                "coefficients": self.coefficients,
-                "stability": self.stability,
-                "reference": self.reference,
-                "scale": self.scale,
-                "components": self.components,
-                "metadata": self.metadata,
-                "methods": self.methods,
-                "provenance": self.provenance,
-                "thresholds": self.thresholds,
-                "warnings": self.warnings,
-                "errors": self.errors,
-            }
-        )
+        return _report_to_dict(self, _AUDIT_REPORT_FIELDS)
 
     def to_json(self, **kwargs: Any) -> str:
         """Serialize the report to JSON."""
 
-        options = {"ensure_ascii": False, "indent": 2, "sort_keys": True}
-        options.update(kwargs)
-        return json.dumps(self.to_dict(), **options)
+        return _report_to_json(self, _AUDIT_REPORT_FIELDS, **kwargs)
 
     def to_dataframe(self) -> pd.DataFrame:
         """Return one flattened ``path``/``value`` row per report value."""
 
-        rows: list[dict[str, Any]] = []
-        _flatten(self.to_dict(), "", rows, include_empty=True)
-        return pd.DataFrame(rows, columns=["path", "value"])
+        return _report_to_dataframe(self, _AUDIT_REPORT_FIELDS)
 
     def _boolean_failures(self, *, include_reference: bool = False) -> list[str]:
         failures: list[str] = []
@@ -175,12 +167,7 @@ class AuditReport:
 
     @staticmethod
     def _get_path(root: Any, path: str) -> Any:
-        value = root
-        for part in path.split("."):
-            if value is _MISSING or not hasattr(value, part):
-                return _MISSING
-            value = getattr(value, part)
-        return value
+        return _get_report_path(root, path)
 
     def _threshold_failures(
         self,
@@ -438,45 +425,21 @@ class SystemAuditReport:
     def to_dict(self) -> dict[str, Any]:
         """Return the report as JSON-compatible data."""
 
-        return _jsonable(
-            {
-                "system_type": self.system_type,
-                "structure": self.structure,
-                "accounting": self.accounting,
-                "coefficients": self.coefficients,
-                "stability": self.stability,
-                "reference": self.reference,
-                "metadata": self.metadata,
-                "methods": self.methods,
-                "provenance": self.provenance,
-                "thresholds": self.thresholds,
-                "warnings": self.warnings,
-                "errors": self.errors,
-            }
-        )
+        return _report_to_dict(self, _SYSTEM_REPORT_FIELDS)
 
     def to_json(self, **kwargs: Any) -> str:
         """Serialize the report to JSON."""
 
-        options = {"ensure_ascii": False, "indent": 2, "sort_keys": True}
-        options.update(kwargs)
-        return json.dumps(self.to_dict(), **options)
+        return _report_to_json(self, _SYSTEM_REPORT_FIELDS, **kwargs)
 
     def to_dataframe(self) -> pd.DataFrame:
         """Return flattened report values as a DataFrame."""
 
-        rows: list[dict[str, Any]] = []
-        _flatten(self.to_dict(), "", rows, include_empty=True)
-        return pd.DataFrame(rows, columns=["path", "value"])
+        return _report_to_dataframe(self, _SYSTEM_REPORT_FIELDS)
 
     @staticmethod
     def _get_path(root: Any, path: str) -> Any:
-        value = root
-        for part in path.split("."):
-            if not hasattr(value, part):
-                return _MISSING
-            value = getattr(value, part)
-        return value
+        return _get_report_path(root, path)
 
     def _failures(
         self,
