@@ -13,6 +13,24 @@
       "result": "The full file is not passed as Z because it is long-form and contains duplicated code pairs from special classifications."
     },
     {
+      "name": "japan_estat_api_2020_agri_9sector",
+      "table_form": "long_output_table_api",
+      "model": "pre-extraction_structure_check",
+      "raw_path": "data_raw/external_validation/estat_api/0004047205.json",
+      "source": "e-Stat API",
+      "selection": "Use statsDataId=0004047205 and inspect the category axes, unit, missing-value tokens, and valuation before selecting a square block.",
+      "result": "The API returned STATUS=0 with 480 observations, 20 row categories, 24 column categories, and unit 100万円. A '-' token is present. Preserving that token for IOSystem produced structure FAIL and downstream coefficient/stability SKIPPED, as intended for an unparsed long table."
+    },
+    {
+      "name": "japan_tokyo_prefecture_2015",
+      "table_form": "prefectural_producer_price_table_xls",
+      "model": "pre-extraction_structure_check",
+      "raw_path": "data_raw/prefecture_2015_confirmed_candidates/13_東京都_02_sr15ta_nai12.xls",
+      "source": "Tokyo 2015 prefectural IO candidate copied from the confirmed-candidates collection",
+      "selection": "Inspect the old .xls sheet and select the 107-sector transaction block only after confirming row/column codes and total rows/columns.",
+      "result": "The sheet is 123x141, with 107 sector row codes and 138 populated value columns. The candidate 107x107 block has a separate intermediate-total column and additional final-demand/value-added rows. The file was used to verify that the extraction boundary remains explicit; no automatic x or Z selection was performed."
+    },
+    {
       "name": "united_kingdom_2023",
       "table_form": "product_by_product_siot",
       "model": "IOSystem",
@@ -47,6 +65,24 @@
       "source": "US supplied table files",
       "selection": "Compare the CSV and XLSX matrices and do not treat total requirements as transaction matrix Z.",
       "result": "The supplied CSV and XLSX values were identical for the 15-sector matrix."
+    },
+    {
+      "name": "united_states_bea_2002_detail",
+      "table_form": "fixed_width_make_use_requirements",
+      "model": "pre-extraction_structure_check",
+      "raw_path": "data_raw/us_bea_2002_detail_redef.zip",
+      "source": "U.S. Bureau of Economic Analysis 2002 Benchmark Input-Output Accounts",
+      "selection": "Read the supplied field-layout documentation and parse the fixed-width row, column, value records before constructing a SUT or SIOT.",
+      "result": "The package contains 4,773-line Make, 57,131-line Use, and 185,311-line Direct Requirements files including headers. The fixed-width records and 2002 year fields were verified. The official note that detail may differ from totals due to rounding was retained as a validation constraint."
+    },
+    {
+      "name": "united_states_bls_2035",
+      "table_form": "producer_price_sut_with_terminal_row_column",
+      "model": "SUTSystem",
+      "raw_path": "data_raw/us_bls_input_output.zip",
+      "source": "U.S. Bureau of Labor Statistics Employment Projections Program",
+      "selection": "Use the documented 176-sector Make, 177x177 Use, 176x132 detailed FD, 176x11 aggregate FD, and separate output files. Remove terminal row/column only in caller-controlled extraction.",
+      "result": "The documented Use terminal row is value added and terminal column is final demand. After explicit extraction and transposing the file's industry-by-commodity Make to SUTSystem's product-by-industry convention, all four SUT balances passed with absolute and rounding tolerance 0.05 million chained 2017 dollars."
     },
     {
       "name": "oecd_icio_2025",

@@ -19,7 +19,7 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
-国別の抽出処理は共通化しません。再現時には、下の表にあるファイルを同じ相対パスへ置き、記載した範囲・軸・モデルを照合します。ファイルがない場合も、出典、形式、切り出し条件を確認する手順自体は追えます。
+国別の抽出処理は共通化しません。再現時には、下の表にあるファイルを同じ相対パスへ置き、記載した範囲・軸・モデルを照合します。ファイルがない場合も、出典、形式、切り出し条件を確認する手順自体は追えます。現在は、単一SIOTだけでなく、SUT、MRIO、長形式API、固定幅ファイル、旧形式`.xls`も検証対象に含めています。
 
 ## 検証マニフェスト
 
@@ -28,10 +28,14 @@ python -m pytest -q
 | 系統 | 表形式 | 使用モデル | 検証内容 |
 | --- | --- | --- | --- |
 | 日本・経産省/e-Stat | 縦長Output Table | 抽出前の構造診断 | 行・列コード、特殊分類、価格列、正方ブロック化の境界 |
+| 日本・e-Stat API | 長形式Output Table | 抽出前の構造診断 | API応答、カテゴリ軸、単位、`-`欠測トークン、非正方データ |
+| 東京都 | 2015年107部門表（旧`.xls`） | 抽出前の構造診断 | 107部門ブロック、合計列、付加価値・最終需要行の混在 |
 | 英国 | product-by-product SIOT | `IOSystem` | `Z`、`x`、最終需要構成、付加価値、投入側調整、A/L参照 |
 | 台湾 | purchaser-price SIOT | `IOSystem` | 163部門表の見出し、価格評価、産出側調整の明示指定 |
 | 韓国 | producer-price SIOTと国内・輸入ブロック | `IOSystem` | 国内取引、輸入投入、A/L参照、符号と投入側調整 |
 | 米国 | total-requirements matrix | `IOSystem`の参照・ファイル診断 | CSV/XLSX一致、これは取引表`Z`ではないことの確認 |
+| 米国・BEA | 固定幅Make/Use/Requirements | 抽出前の構造診断 | row/column/value形式、固定幅、価格評価、丸め注記 |
+| 米国・BLS | producer-price SUT | `SUTSystem` | 176部門、末尾の付加価値行・最終需要列、Makeの向き、丸め許容差 |
 | OECD | SDMX長形式Use/Value added | `SUTSystem`へ整形 | `P1`、`P2`、`B1G`、活動軸、単位・価格基準の選択 |
 | Eurostat | industry-by-industry SIOT | `IOSystem` | `DOM` / `TOTAL`ブロック、65部門の明示選択、スペクトル半径 |
 | WIOD | 国別SUT | `SUTSystem` | 64商品×64産業、総供給と国内Makeの区別、丸め許容差 |
@@ -41,6 +45,16 @@ python -m pytest -q
 ### 日本・経産省/e-Stat
 
 `external_validation/meti_2020/japan_2020_iot_108_producer_price.xlsx` は、108部門のOutput Tableを含む縦長ファイルです。Row Code、Column Code、Special Classification、価格評価列を確認します。同じコードの重複を含むため、ファイル全体を`Z`へ変換しません。出典資料に基づいて取引表ブロックを別途選び、選択後の配列を`IOSystem`へ渡す境界を確認します。
+
+### 日本・e-Stat API
+
+`external_validation/estat_api/0004047205.json` は、e-Stat APIのstatsDataId `0004047205`から取得した応答です。APIは成功応答を返しましたが、データは20行カテゴリ×24列カテゴリの480観測からなる長形式で、単位は100万円、値には`-`が含まれます。これを未解釈のまま`IOSystem`へ渡すと、構造診断が`FAIL`、係数・安定性が`SKIPPED`になりました。API取得が成功しても、そのまま`Z`へ渡せるとは限らないことを確認するケースです。
+
+API仕様は[e-Stat API利用案内](https://www.e-stat.go.jp/api/api-info/e-stat-manual3-0)を参照します。カテゴリの意味、単位、欠測値、価格評価を確認してから、呼び出し側で正方ブロックを切り出します。
+
+### 東京都・2015年表
+
+`prefecture_2015_confirmed_candidates`の東京都候補は旧`.xls`形式で、シートは123行×141列です。部門コードを持つ107行と、合計・付加価値等の追加行、107部門の中間取引候補列と最終需要等の追加列が同じシートにあります。107×107の候補ブロックと中間需要合計列を確認しましたが、`x`や最終需要の列は自動選択していません。旧Excel形式の読み込み自体も、呼び出し側の前処理として扱います。
 
 ### 英国
 
@@ -57,6 +71,16 @@ python -m pytest -q
 ### 米国
 
 `data_raw/Table.xlsx` と `data_raw/Table.csv` は同一の15部門total-requirements matrixとして照合します。これは中間取引行列`Z`ではないため、取引表として会計監査へ渡さず、ファイル診断と`L_reference`等の参照検証に使います。BEA/BLSのMake/UseはSUT形式として扱い、v0.1の`IOSystem`へ自動変換しません。
+
+### 米国・BEA 2002 Benchmark
+
+`data_raw/us_bea_2002_detail_redef.zip`は、BEAの2002年Benchmark Make/Use/Direct Requirements詳細資料です。Makeは4,773行、Useは57,131行、Direct Requirementsは185,311行で、いずれも見出しを含みます。付属資料に従って固定幅のrow/column/valueフィールドを確認し、producer's value、purchaser's value、margin項目の区別を保ったまま、必要なSUTまたはSIOTブロックを呼び出し側で作成します。付属READMEの、詳細値は丸めのため合計と一致しない場合があるという注意も、許容差設定の根拠として記録します。
+
+### 米国・BLS 2035 projected tables
+
+`data_raw/us_bls_input_output.zip`の付属資料で、`USE`は176商品×176産業の中間使用に、付加価値の末尾行と最終需要の末尾列を加えた177×177、`MAKE`は176×176、集計最終需要は176×11であることを確認しました。ファイル上の`MAKE`は産業×商品なので、`SUTSystem`へ渡す場合は呼び出し側で商品×産業へ明示的に転置します。2035年実質表を明示抽出し、`output_by_product_scope="domestic_output"`、単位million chained 2017 dollars、絶対・丸め許容差0.05を指定したところ、商品側・産業側・Make側の4会計が`PASS`になりました。許容差はBLS資料の小数丸めに対応する検証用設定で、ライブラリの既定値ではありません。
+
+出典は[BEA Benchmark Input-Output Data](https://www.bea.gov/industry/benchmark-input-output-data)と[BLS Input-Output Matrix](https://www.bls.gov/emp/data/input-output-matrix.htm)です。
 
 ### OECD
 

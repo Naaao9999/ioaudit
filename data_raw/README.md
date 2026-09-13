@@ -10,11 +10,17 @@
 - 英国、韓国、米国、台湾の検証用ファイル
 - 都道府県間産業連関表の確認済み候補ファイル
 
+追加の形式検証用として、e-Stat APIの応答、米国BEAの固定幅Benchmark資料、米国BLSのSUT資料も保存しています。これらは抽出前の境界確認に使い、国別の読み込み処理をパッケージ本体へ追加するための入力にはしません。
+
 米国表については、`Table.xlsx` / `Table.csv` が2024年の15部門の総必要量行列です。`L_reference` とファイル診断の検証に使用します。`Z` として利用する中間取引表ではありません。
 
 追加した `us_bea_2002_summarytables.zip` と `us_bea_2002_detail_redef.zip` は、米国BEAが公開する2002年ベンチマークのMake/Use、Direct Requirements、Total Requirements資料です。Make/UseはSUT形式のため、v0.1の`IOSystem`へ自動変換せず、形式境界と参照資料の確認に使用します。
 
 `us_bls_input_output.zip` は、米国BLSの研究者向けデータです。1997–2025年の名目・実質I-Oデータと2035年予測、部門対応表、レイアウト説明を含みます。`USE` は商品×産業の使用表で、末尾の行が付加価値、末尾の列が最終需要です。したがって、見かけ上は正方でも、v0.1の単一SIOTの`Z`へそのまま渡さず、SUT形式の読み違い検出と抽出手順の検証に使用します。
+
+`external_validation/estat_api/0004047205.json` は、e-Stat APIから取得した長形式の応答です。20行カテゴリ×24列カテゴリ、単位100万円、`-`欠測トークンを含むため、未解釈のまま`Z`へ渡せないことを確認しました。
+
+`prefecture_2015_confirmed_candidates` の東京都候補は旧`.xls`形式です。107部門の候補ブロックと、合計・最終需要・付加価値に相当する追加軸が同じシートにあるため、呼び出し側での範囲確認が必要です。
 
 出所: https://www.bea.gov/industry/benchmark-input-output-data
 　　　https://www.bls.gov/emp/data/input-output-matrix.htm

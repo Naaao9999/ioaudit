@@ -65,6 +65,7 @@ v0.1公開後は、次の公開入口と入力項目の意味を維持します�
 
 - 336テスト、`compileall`、wheel・sdist作成、`twine check`、クリーン出力先での配布物検査を完了
 - 英国、韓国、米国のローカル実データ検証をdense・iterative経路で再実行
+- 日本のe-Stat API、東京都旧`.xls`、米国BEA固定幅Benchmark、米国BLS SUTを追加収集して検証。e-Statは480観測の長形式、東京都は107部門候補、BEAは固定幅、BLSは末尾の付加価値行・最終需要列とMakeの向きを確認
 - 日本、台湾、OECD、Eurostat、WIODは、rawファイルの所在と抽出条件をマニフェストへ記録済み。各系統の再実行ログ統合を残す
 - Python 3.14を含むCI workflowは設定済み。GitHub Actionsの実行結果確認を残す
 - 公開用リポジトリへの反映、タグ作成、PyPI公開は未実施
