@@ -66,8 +66,10 @@ v0.1公開後は、次の公開入口と入力項目の意味を維持します�
 - 336テスト、`compileall`、wheel・sdist作成、`twine check`、クリーン出力先での配布物検査を完了
 - 英国、韓国、米国のローカル実データ検証をdense・iterative経路で再実行
 - 日本のe-Stat API、東京都旧`.xls`、米国BEA固定幅Benchmark、米国BLS SUTを追加収集して検証。e-Statは480観測の長形式、東京都は107部門候補、BEAは固定幅、BLSは末尾の付加価値行・最終需要列とMakeの向きを確認
-- 日本、台湾、OECD、Eurostat、WIODは、rawファイルの所在と抽出条件をマニフェストへ記録済み。各系統の再実行ログ統合を残す
-- Python 3.14を含むCI workflowは設定済み。GitHub Actionsの実行結果確認を残す
+- 日本、台湾、OECD、Eurostat、WIODは、rawファイルの所在・抽出条件・検証結果をマニフェストと [`validation/RESULTS.md`](validation/RESULTS.md) に記録済み
+- `price_basis`、単位、部門順序、国内/総取引範囲と参照行列の一致確認手順を [`validation/README.md`](validation/README.md) に記録済み
+- Python 3.14を含むCI workflowを確認済み。`c2f54cf`のGitHub Actions Run 8は3.10〜3.14と配布物検査を成功。GitHub画面にはcheckoutの非ブロッキング注記とNode 20移行警告が表示されたため、action更新は継続課題
+- cleanなwheel・sdistを作成し、`twine check`、依存関係を入れた新規venvへのインストール、最小監査の実行を確認済み
 - 公開用リポジトリへの反映、タグ作成、PyPI公開は未実施
 
 これらは宣言と検証を目的とし、自動換算、自動マッチング、自動分類は行いません。MRIO / SUTの変換、価格評価の変換、交易推計、行列バランシングは別レイヤーの責務とします。
@@ -164,8 +166,10 @@ After publication, changes are normally limited to bug fixes, documentation, tes
 
 - 336 tests, `compileall`, wheel/sdist creation, `twine check`, and distribution inspection in a clean output directory are complete
 - UK, Korea, and US local-data checks were rerun through the dense and iterative routes
-- Japan, Taiwan, OECD, Eurostat, and WIOD file locations and extraction conditions are recorded in the manifest; consolidating rerun logs remains
-- The CI workflow includes Python 3.14; confirmation of the GitHub Actions result remains
+- Japan, Taiwan, OECD, Eurostat, and WIOD raw-file locations, extraction conditions, and validation results are recorded in the manifest and [`validation/RESULTS.md`](validation/RESULTS.md)
+- A procedure for checking `price_basis`, units, sector order, domestic/total scope, and reference-matrix compatibility is recorded in [`validation/README.md`](validation/README.md)
+- The CI workflow including Python 3.14 has been verified. GitHub Actions Run 8 for `c2f54cf` succeeded on Python 3.10–3.14 and distribution checks; non-blocking checkout and Node 20 migration annotations remain follow-up items
+- A clean wheel and sdist passed `twine check`, fresh-venv installation, and a minimal audit smoke test
 - Public-repository promotion, tagging, and PyPI publication have not been performed
 
 These additions declare and validate meaning. They do not perform automatic conversion, matching, or classification. MRIO/SUT transformation, price-basis conversion, trade estimation, and matrix balancing belong in separate layers.
