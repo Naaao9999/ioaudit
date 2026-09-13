@@ -10,3 +10,5 @@ htmlcov/
 venv/
 dist/
 build/
+data_raw/*
+!data_raw/README.md
