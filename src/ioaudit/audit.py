@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ._accounting_plan import compile_accounting_plan
-from ._residuals import evaluate_plan
+from ._context import AuditContext
 from .accounting import diagnose_accounting
 from .coefficients import diagnose_coefficients
 from .components import diagnose_components
@@ -19,7 +19,7 @@ from .results import AuditReport
 from .scale import diagnose_scale
 from .signs import diagnose_signs
 from .stability import diagnose_stability
-from .structure import _core_inputs_are_safe, _is_sparse, diagnose_structure
+from .structure import _is_sparse, diagnose_structure
 from .zero_output import diagnose_zero_output
 
 
@@ -58,9 +58,6 @@ def audit(
     structure, arrays = diagnose_structure(io)
     z = arrays.get("Z")
     x = arrays.get("x")
-    core_inputs_safe = _core_inputs_are_safe(structure)
-    dependent_z = z if core_inputs_safe else None
-    dependent_x = x if core_inputs_safe else None
     method = _select_method(
         numerical_method,
         structure.n_rows if structure.z_is_square == "PASS" else None,
@@ -83,52 +80,31 @@ def audit(
         structure=structure,
         tolerance=accounting_tolerance,
     )
-    baseline = evaluate_plan(dependent_z, dependent_x, plan)
-    zero_structure = diagnose_zero_output(
-        dependent_z,
-        dependent_x,
-        list(io.sectors),
-        final_demand=plan.y,
-        value_added=plan.v,
-    )
-    accounting = diagnose_accounting(
-        z,
-        x,
-        io.accounting,
-        list(io.sectors),
-        plan=plan,
-        baseline=baseline,
-    )
-    metadata = diagnose_metadata(io.metadata)
-    orientation = diagnose_orientation(
+    context = AuditContext.build(
         io,
-        z,
-        x,
-        structure,
+        structure=structure,
+        components=components,
+        arrays=arrays,
         plan=plan,
     )
+    zero_structure = diagnose_zero_output(context)
+    accounting = diagnose_accounting(context)
+    metadata = diagnose_metadata(io.metadata)
+    orientation = diagnose_orientation(context)
     coefficients = diagnose_coefficients(
-        z,
-        x,
-        alignment_safe=core_inputs_safe,
+        context.dependent_z,
+        context.dependent_x,
+        alignment_safe=context.core_inputs_safe,
         alignment_reason=(
             "Z, x, or their sector labels are not safely aligned; coefficients are SKIPPED"
-            if not core_inputs_safe
+            if not context.core_inputs_safe
             else None
         ),
     )
     stability = diagnose_stability(coefficients.A, numerical_method=method)
     reference = diagnose_reference(io, coefficients.A, stability.leontief_inverse)
     signs = diagnose_signs(io)
-    scale = diagnose_scale(
-        dependent_z,
-        dependent_x,
-        io,
-        list(io.sectors),
-        reference_diagnostics=reference,
-        plan=plan,
-        baseline=baseline,
-    )
+    scale = diagnose_scale(context, reference_diagnostics=reference)
 
     methods.spectral_radius_exact = stability.spectral_radius_exact
     methods.condition_number_exact = stability.condition_number_exact

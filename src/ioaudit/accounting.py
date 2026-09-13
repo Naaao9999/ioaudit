@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 
 from ._accounting_plan import AccountingPlan
-from ._residuals import PlanResiduals, evaluate_residual
+from ._context import AuditContext
+from ._residuals import evaluate_residual
 from .conventions import AccountingConvention
 from .structure import _shape_of
 
@@ -107,21 +108,19 @@ def _formula(plan: AccountingPlan) -> str:
     return f"output: {output}; input: {input_side}"
 
 
-def diagnose_accounting(
-    z: Any,
-    x: np.ndarray | None,
-    convention: AccountingConvention | None,
-    sectors: list[Any],
-    *,
-    plan: AccountingPlan,
-    baseline: PlanResiduals,
-) -> AccountingDiagnostics:
+def diagnose_accounting(context: AuditContext) -> AccountingDiagnostics:
     """Report residuals from a compiled accounting plan.
 
     The top-level audit compiles the plan and baseline once and passes them to
     every dependent diagnostic. This function converts that shared context
     into the public accounting report.
     """
+    z = context.z
+    x = context.x
+    convention = context.io.accounting
+    sectors = list(context.sectors)
+    plan = context.plan
+    baseline = context.baseline
     result = AccountingDiagnostics(
         convention=convention.to_dict() if convention is not None else None,
         tolerance=plan.tolerance,

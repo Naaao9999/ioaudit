@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from ._context import AuditContext
 from .structure import _all_finite, _is_sparse, _shape_of
 
 
@@ -34,14 +35,7 @@ class ZeroOutputDiagnostics:
     isolated_indices: list[int] = field(default_factory=list)
 
 
-def diagnose_zero_output(
-    z: Any,
-    x: np.ndarray | None,
-    sectors: list[Any],
-    *,
-    final_demand: np.ndarray | None,
-    value_added: np.ndarray | None,
-) -> ZeroOutputDiagnostics:
+def diagnose_zero_output(context: AuditContext) -> ZeroOutputDiagnostics:
     """Find zero-output and abnormal zero-structure sectors.
 
     Zero rows/columns are reported as evidence only.  They are not removed and
@@ -49,6 +43,11 @@ def diagnose_zero_output(
     with nonzero transactions is the existing logical inconsistency check.
     """
 
+    z = context.dependent_z
+    x = context.dependent_x
+    sectors = list(context.sectors)
+    final_demand = context.plan.y
+    value_added = context.plan.v
     result = ZeroOutputDiagnostics()
     z_shape = _shape_of(z) if z is not None else ()
     if z is None or x is None or len(z_shape) != 2 or getattr(x, "ndim", None) != 1 or len(x) != z_shape[1]:

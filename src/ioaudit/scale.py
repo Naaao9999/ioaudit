@@ -12,9 +12,9 @@ from typing import Any
 
 import numpy as np
 
-from ._accounting_plan import AccountingPlan
 from ._balance_core import axis_sum as _axis_sum
-from ._residuals import PlanResiduals, evaluate_residual
+from ._context import AuditContext
+from ._residuals import evaluate_residual
 from .structure import (
     _all_finite,
     _as_array,
@@ -658,18 +658,19 @@ def _robust_outliers(
 
 
 def diagnose_scale(
-    z: Any,
-    x: np.ndarray | None,
-    io: Any,
-    sectors: list[Any],
+    context: AuditContext,
     factors: tuple[float, ...] = DEFAULT_SCALE_FACTORS,
     *,
     reference_diagnostics: Any = None,
-    plan: AccountingPlan,
-    baseline: PlanResiduals,
 ) -> ScaleDiagnostics:
     """Find scale factors that materially reduce declared balance residuals."""
 
+    z = context.dependent_z
+    x = context.dependent_x
+    io = context.io
+    sectors = list(context.sectors)
+    plan = context.plan
+    baseline = context.baseline
     result = ScaleDiagnostics(candidate_factors=list(factors))
     z_shape = _shape_of(z) if z is not None else ()
     if (

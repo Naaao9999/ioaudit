@@ -8,10 +8,10 @@ from typing import Any
 import numpy as np
 
 from ._accounting_plan import AccountingPlan
+from ._context import AuditContext
 from ._residuals import evaluate_residual, residual_for_side
 from .structure import (
     _alignment_is_safe,
-    _core_inputs_are_safe,
     _shape_of,
 )
 
@@ -57,16 +57,17 @@ def _score(
     )
 
 
-def diagnose_orientation(
-    io: Any,
-    z: np.ndarray | None,
-    x: np.ndarray | None,
-    structure: Any,
-    *,
-    plan: AccountingPlan,
-) -> OrientationDiagnostics:
+def diagnose_orientation(context: AuditContext) -> OrientationDiagnostics:
     """Compare current and transposed accounting evidence when available."""
 
+    io = context.io
+    # Raw values here are the structure-validated arrays used to report shape
+    # and label evidence.  They are never used for residual calculations until
+    # the canonical core safety gate below has passed.
+    z = context.z
+    x = context.x
+    structure = context.structure
+    plan = context.plan
     result = OrientationDiagnostics()
     z_shape = _shape_of(z) if z is not None else ()
     if (
@@ -114,7 +115,7 @@ def diagnose_orientation(
         result.x_alignment = x_exact
         result.normalized_x_alignment = x_normalized
 
-    if not _core_inputs_are_safe(structure):
+    if not context.core_inputs_safe:
         result.evidence.append(
             "core Z/x values or sector labels are not safely aligned; orientation comparison is SKIPPED"
         )
