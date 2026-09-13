@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import copy
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +23,35 @@ _TRADE_FLOW_FIELDS = (
     "combined_inflows",
     "combined_outflows",
 )
+
+
+def _copy_output_adjustment_roles(value: Any) -> Any:
+    """Copy explicit output-adjustment component roles safely.
+
+    Roles are semantic declarations, not numeric data.  They may be supplied
+    as a mapping from DataFrame column labels to ``inflow``, ``outflow``, or
+    ``other``, or as a positional sequence for an unlabeled two-dimensional
+    adjustment block.  Validation of the labels and role names is deferred to
+    the audit plan compiler so it can report a local SKIPPED diagnostic.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return copy.deepcopy(dict(value))
+    if isinstance(value, pd.Index):
+        return copy.deepcopy(value.tolist())
+    if isinstance(value, np.ndarray):
+        if value.ndim != 1:
+            raise IOValidationError(
+                "output_adjustment_roles must be a mapping or one-dimensional sequence"
+            )
+        return copy.deepcopy(value.tolist())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return copy.deepcopy(list(value))
+    raise IOValidationError(
+        "output_adjustment_roles must be a mapping or one-dimensional sequence"
+    )
 
 
 def _copy_value(value: Any, name: str, *, allow_none: bool = True) -> Any:
@@ -118,6 +147,7 @@ class IOSystem:
         trade: TradeFlows | None = None,
         input_adjustments: Any = None,
         output_adjustments: Any = None,
+        output_adjustment_roles: Mapping[Any, str] | Sequence[str] | None = None,
         A_reference: Any = None,
         L_reference: Any = None,
         metadata: dict[str, Any] | None = None,
@@ -144,6 +174,9 @@ class IOSystem:
         self.V = _copy_value(V, "V")
         self.input_adjustments = _copy_value(input_adjustments, "input_adjustments")
         self.output_adjustments = _copy_value(output_adjustments, "output_adjustments")
+        self.output_adjustment_roles = _copy_output_adjustment_roles(
+            output_adjustment_roles
+        )
         self.A_reference = _copy_value(A_reference, "A_reference")
         self.L_reference = _copy_value(L_reference, "L_reference")
         self.trade = TradeFlows(**trade.__dict__) if trade is not None else None

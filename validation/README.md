@@ -90,7 +90,7 @@ API仕様は[e-Stat API利用案内](https://www.e-stat.go.jp/api/api-info/e-sta
 
 ### 台湾
 
-`data_raw/f110c08e.xlsx` の `F110C08e` シートは、購入者価格の163×163取引表です。単位、行・列コード、注記、合計項目を確認してから対象ブロックを選びます。購入者価格に伴うマージン・税などを別途扱う場合は、資料に基づく符号付き`output_adjustments`として渡し、`PriceBasis.PURCHASER`を記録します。自動的な生産者価格変換は行いません。
+`data_raw/f110c08e.xlsx` の `F110C08e` シートは、購入者価格の163×163取引表です。単位、行・列コード、注記、合計項目を確認してから対象ブロックを選びます。購入者価格に伴うマージン・税などを別途扱う場合は、資料に基づく符号付き`output_adjustments`として渡し、`PriceBasis.PURCHASER`を記録します。交易フローと2次元の調整ブロックを併用する場合は、各調整項目を`output_adjustment_roles`で明示します。自動的な生産者価格変換は行いません。
 
 ### 韓国
 

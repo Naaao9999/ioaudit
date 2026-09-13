@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ioaudit import IOAuditError, MRIOSystem, audit_mrio
+from ioaudit import IOAuditError, IOValidationError, MRIOSystem, SUTSystem, audit_mrio
 
 
 def _small_mrio(*, with_supporting_blocks: bool = True) -> MRIOSystem:
@@ -62,3 +62,44 @@ def test_v02_require_complete_only_rejects_unavailable_optional_checks():
     assert report.passed(require_complete=True) is False
     with pytest.raises(IOAuditError):
         report.raise_for_status(require_complete=True)
+
+
+def test_mrio_overflow_skips_accounting_instead_of_crashing():
+    mrio = MRIOSystem(
+        Z=np.array([[1e308, 1e308], [1e308, 1e308]]),
+        x=np.array([1e308, 1e308]),
+        regions=["R"],
+        sectors=["A", "B"],
+        Y=np.zeros((2, 1)),
+        V=np.zeros((1, 2)),
+    )
+
+    report = audit_mrio(mrio)
+
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert report.accounting.input_balance.status == "SKIPPED"
+
+
+def test_sut_and_mrio_invalid_constructor_inputs_use_public_validation_error():
+    with pytest.raises(IOValidationError):
+        SUTSystem(
+            use=np.eye(1),
+            products=["p"],
+            industries=["i"],
+            output_by_product_scope=[],
+        )
+    with pytest.raises(IOValidationError):
+        SUTSystem(
+            use=np.eye(1),
+            products=["p"],
+            industries=["i"],
+            metadata=["invalid"],
+        )
+    with pytest.raises(IOValidationError):
+        MRIOSystem(
+            Z=np.eye(1),
+            x=np.ones(1),
+            regions=["R"],
+            sectors=["S"],
+            metadata=["invalid"],
+        )

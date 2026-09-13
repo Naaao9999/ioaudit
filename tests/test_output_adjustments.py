@@ -93,6 +93,10 @@ def test_trade_and_labelled_nontrade_output_adjustments_can_coexist():
         Y=np.array([11.0, 21.0]),
         trade=TradeFlows(international_imports=np.array([2.0, 3.0])),
         output_adjustments=adjustments,
+        output_adjustment_roles={
+            "Net Import Duties": "other",
+            "Trade Margin": "other",
+        },
         accounting=convention,
     )
     report = audit(io)
@@ -143,6 +147,65 @@ def test_output_adjustment_trade_label_overlap_is_skipped():
     assert "overlap" in report.accounting.output_balance.reason
 
 
+def test_trade_like_adjustment_label_requires_explicit_role():
+    adjustments = pd.DataFrame(
+        [[1.0], [2.0]], index=["A", "B"], columns=["Net imports"]
+    )
+    convention = AccountingConvention.domestic_competitive(
+        inflow_sign="positive",
+        trade_representation="outflows_in_Y",
+        external_flow_scope="international",
+        output_representation="adjustments_required",
+    )
+    report = audit(
+        _base(
+            convention,
+            output_adjustments=adjustments,
+            trade=TradeFlows(international_imports=np.zeros(2)),
+        )
+    )
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert "output_adjustment_roles" in report.accounting.output_balance.reason
+
+
+def test_explicit_trade_role_is_rejected():
+    adjustments = pd.DataFrame(
+        [[1.0], [2.0]], index=["A", "B"], columns=["Import adjustment"]
+    )
+    convention = AccountingConvention.domestic_competitive(
+        inflow_sign="positive",
+        trade_representation="outflows_in_Y",
+        external_flow_scope="international",
+        output_representation="adjustments_required",
+    )
+    report = audit(
+        _base(
+            convention,
+            output_adjustments=adjustments,
+            trade=TradeFlows(international_imports=np.zeros(2)),
+        )
+    )
+    # A trade-like label is not interpreted as a role.  Explicitly supplied
+    # roles are tested in the companion case below.
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert "output_adjustment_roles" in report.accounting.output_balance.reason
+
+    report = audit(
+        IOSystem(
+            np.array([[1.0, 0.0], [0.0, 2.0]]),
+            np.array([10.0, 20.0]),
+            ["A", "B"],
+            Y=np.array([11.0, 21.0]),
+            trade=TradeFlows(international_imports=np.zeros(2)),
+            output_adjustments=adjustments,
+            output_adjustment_roles={"Import adjustment": "inflow"},
+            accounting=convention,
+        )
+    )
+    assert report.accounting.output_balance.status == "SKIPPED"
+    assert "trade-related" in report.accounting.output_balance.reason
+
+
 def test_output_adjustment_label_mismatch_is_local_to_supporting_input():
     adjustments = pd.DataFrame(
         [[1.0], [2.0]], index=["B", "A"], columns=["Trade Margin"]
@@ -171,6 +234,8 @@ def test_output_adjustment_subtotal_is_detected_and_not_used():
         for item in report.components.subtotal_candidates
     )
     assert report.accounting.output_balance.status == "SKIPPED"
+    assert any("subtotal components" in warning for warning in report.warnings)
+    assert not any("Y/V subtotal components" in warning for warning in report.warnings)
 
 
 def test_output_adjustment_is_included_in_input_hash():

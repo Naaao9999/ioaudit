@@ -19,13 +19,15 @@ v0.1 の対象は、単一の対称産業連関表（SIOT）を分析コード�
 
 `output_adjustments` は、マージン、税、輸入調整などを利用者が資料に基づいて符号付きで用意するための入力です。v0.1 は生産者価格への変換、項目の自動推定、単位換算を行いません。
 
+`TradeFlows` と2次元の `output_adjustments` を併用する場合は、調整項目ごとの役割を `output_adjustment_roles` で明示します。`inflow`、`outflow` は交易との重複を避けるため併用せず、`other` の項目だけを交易と組み合わせます。役割のないブロックは、列名から交易項目かどうかを推測せず、産出側会計を `SKIPPED` とします。
+
 ### v0.1 API freeze
 
 v0.1公開後は、次の公開入口と入力項目の意味を維持します。
 
 - `IOSystem`、`TradeFlows`、`AccountingConvention`、`AuditReport`、`audit()`
 - `Z`、`x`、`sectors` の基本位置引数
-- `Y`、`V`、`trade`、`input_adjustments`、`output_adjustments`、参照行列、metadata、accountingのkeyword引数
+- `Y`、`V`、`trade`、`input_adjustments`、`output_adjustments`、`output_adjustment_roles`、参照行列、metadata、accountingのkeyword引数
 - `PASS`、`AVAILABLE`、`WARNING`、`FAIL`、`SKIPPED` のstatus契約
 - 不明な意味を推測せず、影響する診断を `SKIPPED` とする方針
 
@@ -60,10 +62,13 @@ v0.1公開後は、次の公開入口と入力項目の意味を維持します�
 - `price_basis` と参照行列の評価基準・単位が一致しているかを利用者が確認する手順を検証する
 - rawデータを配布物へ含めず、wheel・sdist・クリーン環境インストールを公開前に確認する
 - 公開用リポジトリへの反映、リリースタグ作成、PyPI公開は別途承認後に実施する
+- `output_adjustments` 単独で交易表現を宣言できる会計モードを検討する
+- SUTのSupply表に対応する固有の会計恒等式を追加するか検討する
+- `output_adjustments` をscale診断の候補に含めるか検討する
 
 #### 公開前チェックの現在状況
 
-- 336テスト、`compileall`、wheel・sdist作成、`twine check`、クリーン出力先での配布物検査を完了
+- 340テスト、`compileall`、wheel・sdist作成、`twine check`、クリーン出力先での配布物検査を完了
 - 英国、韓国、米国のローカル実データ検証をdense・iterative経路で再実行
 - 日本のe-Stat API、東京都旧`.xls`、米国BEA固定幅Benchmark、米国BLS SUTを追加収集して検証。e-Statは480観測の長形式、東京都は107部門候補、BEAは固定幅、BLSは末尾の付加価値行・最終需要列とMakeの向きを確認
 - 日本、台湾、OECD、Eurostat、WIODは、rawファイルの所在・抽出条件・検証結果をマニフェストと [`validation/RESULTS.md`](validation/RESULTS.md) に記録済み
@@ -119,13 +124,15 @@ The current scope includes:
 
 `output_adjustments` lets the caller supply signed margins, taxes, import adjustments, or similar terms after checking the source documentation. v0.1 does not convert to producer prices, infer components, or convert units.
 
+When a two-dimensional `output_adjustments` block is used together with `TradeFlows`, every component role must be declared through `output_adjustment_roles`. `inflow` and `outflow` are rejected as overlapping trade inputs; only components marked `other` may be combined with `TradeFlows`. Without roles, the output-side identity is skipped rather than inferred from labels.
+
 ### v0.1 API freeze
 
 After the v0.1 release, the following public contract is kept stable:
 
 - `IOSystem`, `TradeFlows`, `AccountingConvention`, `AuditReport`, and `audit()`
 - the positional meaning of `Z`, `x`, and `sectors`
-- the keyword inputs `Y`, `V`, `trade`, `input_adjustments`, `output_adjustments`, references, metadata, and accounting
+- the keyword inputs `Y`, `V`, `trade`, `input_adjustments`, `output_adjustments`, `output_adjustment_roles`, references, metadata, and accounting
 - the status contract `PASS`, `AVAILABLE`, `WARNING`, `FAIL`, and `SKIPPED`
 - the rule that unknown meaning is not inferred and affected diagnostics are `SKIPPED`
 
@@ -164,13 +171,16 @@ After publication, changes are normally limited to bug fixes, documentation, tes
 
 #### Current pre-publication status
 
-- 336 tests, `compileall`, wheel/sdist creation, `twine check`, and distribution inspection in a clean output directory are complete
+- 340 tests, `compileall`, wheel/sdist creation, `twine check`, and distribution inspection in a clean output directory are complete
 - UK, Korea, and US local-data checks were rerun through the dense and iterative routes
 - Japan, Taiwan, OECD, Eurostat, and WIOD raw-file locations, extraction conditions, and validation results are recorded in the manifest and [`validation/RESULTS.md`](validation/RESULTS.md)
 - A procedure for checking `price_basis`, units, sector order, domestic/total scope, and reference-matrix compatibility is recorded in [`validation/README.md`](validation/README.md)
 - The CI workflow including Python 3.14 has been verified. GitHub Actions Run 8 for `c2f54cf` succeeded on Python 3.10–3.14 and distribution checks; non-blocking checkout and Node 20 migration annotations remain follow-up items
 - A clean wheel and sdist passed `twine check`, fresh-venv installation, and a minimal audit smoke test
 - Public-repository promotion, tagging, and PyPI publication have not been performed
+- consider an explicit output-accounting mode for `output_adjustments` without a trade representation
+- consider dedicated Supply identities for SUT audits
+- consider including `output_adjustments` in scale-diagnostic candidates
 
 These additions declare and validate meaning. They do not perform automatic conversion, matching, or classification. MRIO/SUT transformation, price-basis conversion, trade estimation, and matrix balancing belong in separate layers.
 

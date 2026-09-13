@@ -348,11 +348,30 @@ io = IOSystem(
     V=V,
     trade=TradeFlows(international_imports=imports),
     output_adjustments=output_adjustments,
+    output_adjustment_roles={"<component label>": "other"},
     accounting=accounting,
 )
 ```
 
 `output_adjustments` は `(n,)`、または行が部門・列が調整項目の `(n, k)` です。2次元の DataFrame では行ラベルを `sectors` と照合し、列ラベルは調整項目の説明として保持します。`output_representation` の扱いは次のとおりです。
+
+`TradeFlows` と同時に2次元の `output_adjustments` を使う場合は、各調整項目の役割を `output_adjustment_roles` で明示してください。役割には `inflow`、`outflow`、`other` を指定できます。`inflow` と `outflow` は交易項目との重複を避けるため使用せず、`other` の項目だけを併用できます。役割を指定しないブロックは、`Net imports` や `Import adjustment` のような表記から意味を推測せず、産出側会計を `SKIPPED` とします。
+
+```python
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    trade=trade,
+    output_adjustments=adjustments,
+    output_adjustment_roles={
+        "Trade margins": "other",
+        "Taxes less subsidies": "other",
+    },
+    accounting=accounting,
+)
+```
 
 - `"complete"`: 別建ての産出側調整を想定しない。値を渡すと二重計上の可能性として `SKIPPED`。
 - `"adjustments_required"`: 値がない、形状・ラベルが不正、または小計候補がある場合は `SKIPPED`。
@@ -1038,6 +1057,7 @@ io = IOSystem(
     V=V,
     trade=TradeFlows(international_imports=imports),
     output_adjustments=output_adjustments,
+    output_adjustment_roles={"<component label>": "other"},
     accounting=accounting,
 )
 ```
@@ -1049,6 +1069,24 @@ io = IOSystem(
 - `"unknown"`: the output representation is not inferred and the output check is `SKIPPED`.
 
 When `TradeFlows` is also supplied, do not repeat imports or exports in `output_adjustments`. If component labels are unavailable and trade double counting cannot be ruled out, the output check is conservatively `SKIPPED`.
+
+When a two-dimensional `output_adjustments` block is supplied together with `TradeFlows`, classify every component explicitly with `output_adjustment_roles`. Allowed roles are `inflow`, `outflow`, and `other`. Trade-related roles are rejected when the same flow is already supplied through `TradeFlows`; a block containing only `other` components may be used together with it. Without an explicit role declaration, `ioaudit` does not infer the meaning of labels such as `Net imports` or `Import adjustment`, and skips the output-side accounting check.
+
+```python
+io = IOSystem(
+    Z=Z,
+    x=x,
+    sectors=sectors,
+    Y=Y,
+    trade=trade,
+    output_adjustments=adjustments,
+    output_adjustment_roles={
+        "Trade margins": "other",
+        "Taxes less subsidies": "other",
+    },
+    accounting=accounting,
+)
+```
 
 ## TradeFlows
 

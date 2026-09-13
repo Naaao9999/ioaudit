@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from types import SimpleNamespace
+from collections.abc import Mapping
 from typing import Any, Callable, Sequence
 
 import numpy as np
@@ -170,7 +171,7 @@ class SUTSystem:
             self.industries = list(industries)
         except Exception as exc:
             raise IOValidationError("products and industries must be sequences") from exc
-        if output_by_product_scope not in {
+        if not isinstance(output_by_product_scope, str) or output_by_product_scope not in {
             "domestic_output",
             "total_supply",
             "unknown",
@@ -187,7 +188,12 @@ class SUTSystem:
         self.output_by_product = _copy_value(output_by_product, "output_by_product")
         self.output_by_product_scope = output_by_product_scope
         self.value_added = _copy_value(value_added, "value_added")
-        self.metadata = {} if metadata is None else dict(metadata)
+        if metadata is None:
+            self.metadata = {}
+        elif isinstance(metadata, Mapping):
+            self.metadata = dict(metadata)
+        else:
+            raise IOValidationError("metadata must be a mapping")
 
 
 class MRIOSystem:
@@ -225,7 +231,12 @@ class MRIOSystem:
         self.V = _copy_value(V, "V")
         self.A_reference = _copy_value(A_reference, "A_reference")
         self.L_reference = _copy_value(L_reference, "L_reference")
-        self.metadata = {} if metadata is None else dict(metadata)
+        if metadata is None:
+            self.metadata = {}
+        elif isinstance(metadata, Mapping):
+            self.metadata = dict(metadata)
+        else:
+            raise IOValidationError("metadata must be a mapping")
 
     @property
     def labels(self) -> list[tuple[Any, Any]]:
@@ -324,6 +335,21 @@ def _vector_sum(array: np.ndarray, axis: int) -> np.ndarray | None:
             result = np.asarray(array.sum(axis=axis), dtype=float).reshape(-1)
         else:
             result = np.sum(array, axis=axis, dtype=float)
+    return result if np.isfinite(result).all() else None
+
+
+def _safe_vector_add(*values: np.ndarray | None) -> np.ndarray | None:
+    """Add derived vectors and return ``None`` when the result is non-finite."""
+
+    if not values or any(value is None for value in values):
+        return None
+    try:
+        with np.errstate(over="ignore", invalid="ignore"):
+            result = np.asarray(values[0], dtype=float).copy()
+            for value in values[1:]:
+                result = result + np.asarray(value, dtype=float)
+    except (TypeError, ValueError, OverflowError):
+        return None
     return result if np.isfinite(result).all() else None
 
 
@@ -488,8 +514,8 @@ def audit_sut(
         va = value_added if value_added.ndim == 1 else _vector_sum(value_added, axis=0)
     use_rows = _vector_sum(use, axis=1) if use is not None else None
     use_columns = _vector_sum(use, axis=0) if use is not None else None
-    commodity_total = use_rows + fd if use_rows is not None and fd is not None else None
-    industry_total = use_columns + va if use_columns is not None and va is not None else None
+    commodity_total = _safe_vector_add(use_rows, fd)
+    industry_total = _safe_vector_add(use_columns, va)
     accounting.commodity_balance = _check_balance(
         commodity_total,
         output_p,
@@ -652,14 +678,16 @@ def audit_mrio(
     va = None
     if v is not None:
         va = v if v.ndim == 1 else _vector_sum(v, axis=0)
+    z_rows = _vector_sum(z, axis=1) if z is not None else None
+    z_columns = _vector_sum(z, axis=0) if z is not None else None
     accounting.output_balance = _check_balance(
-        _vector_sum(z, axis=1) + fd if z is not None and fd is not None else None,
+        _safe_vector_add(z_rows, fd),
         x,
         equation="x = row_sum(Z) + row_sum(Y)",
         tolerance=accounting_tolerance,
     )
     accounting.input_balance = _check_balance(
-        _vector_sum(z, axis=0) + va if z is not None and va is not None else None,
+        _safe_vector_add(z_columns, va),
         x,
         equation="x = column_sum(Z) + column_sum(V)",
         tolerance=accounting_tolerance,

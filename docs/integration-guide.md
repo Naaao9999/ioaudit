@@ -191,6 +191,7 @@ io = IOSystem(
     V=V,
     trade=TradeFlows(international_imports=imports),
     output_adjustments=output_adjustments,
+    output_adjustment_roles={"value-added tax adjustment": "other"},
     accounting=accounting,
 )
 report = audit(io)
@@ -198,6 +199,15 @@ assert report.accounting.output_balance.status == "PASS"
 ```
 
 `output_adjustments` は `(n,)` または行が部門・列が調整項目の `(n, k)` です。`output_representation="adjustments_required"` でブロックがない場合、形状・ラベルが不正な場合、または小計候補がある場合は、産出側会計を `SKIPPED` にします。`TradeFlows` と同じ輸入・輸出項目を重ねた場合や、項目ラベルがなく交易との重複を排除できない場合も、安全のため使用しません。
+
+`TradeFlows` と2次元の `output_adjustments` を併用する場合は、各列の役割を `output_adjustment_roles` で明示します。役割は `inflow`、`outflow`、`other` のいずれかです。`inflow` と `outflow` は交易との二重計上を避けるため拒否され、`other` の項目だけが併用できます。`Net imports` などの列名から役割を推測しないため、役割を省略したブロックは産出側会計を `SKIPPED` とします。
+
+```python
+output_adjustment_roles = {
+    "Trade margins": "other",
+    "Taxes less subsidies": "other",
+}
+```
 
 ## 会計規約の選び方
 

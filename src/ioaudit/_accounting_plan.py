@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,7 +18,7 @@ from ._balance_core import (
     vector,
 )
 from .conventions import AccountingConvention
-from .structure import _all_finite, _core_inputs_are_safe, _shape_of
+from .structure import _all_finite, _core_inputs_are_safe, _normalize_label, _shape_of
 
 
 @dataclass
@@ -106,6 +107,8 @@ _OUTPUT_TRADE_LABELS = frozenset(
     }
 )
 
+_OUTPUT_ADJUSTMENT_ROLES = frozenset({"inflow", "outflow", "other"})
+
 
 def _output_adjustment_component_labels(value: Any) -> list[Any] | None:
     """Return semantic component labels for a two-dimensional adjustment block."""
@@ -116,30 +119,124 @@ def _output_adjustment_component_labels(value: Any) -> list[Any] | None:
     if columns is None:
         return None
     labels = list(columns)
-    return labels if labels and all(isinstance(label, str) for label in labels) else None
+    return labels or None
 
 
-def _output_adjustment_trade_conflict(io: Any, value: Any) -> str | None:
+def _resolve_output_adjustment_roles(
+    value: Any,
+    roles: Any,
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Resolve an explicit role declaration for adjustment components.
+
+    A role declaration is intentionally required when a two-dimensional
+    output-adjustment block is combined with ``TradeFlows``.  Component names
+    are evidence only; names such as ``Net imports`` are not interpreted as a
+    semantic declaration by the library.
+    """
+
+    if roles is None:
+        return None, None
+    try:
+        shape = _shape_of(value)
+    except Exception as exc:
+        return None, f"output_adjustment_roles could not read adjustment shape: {exc}"
+    if len(shape) != 2:
+        return (
+            None,
+            "output_adjustment_roles apply only to two-dimensional "
+            "output_adjustments",
+        )
+    component_count = shape[1]
+    if isinstance(roles, Mapping):
+        labels = _output_adjustment_component_labels(value)
+        if labels is None or len(labels) != component_count:
+            return (
+                None,
+                "mapping output_adjustment_roles require DataFrame component labels",
+            )
+        normalized_keys: dict[str, list[Any]] = {}
+        for key in roles:
+            normalized_keys.setdefault(_normalize_label(key), []).append(key)
+        resolved: list[str] = []
+        for label in labels:
+            matching_keys: list[Any] = []
+            try:
+                if label in roles:
+                    matching_keys = [label]
+            except TypeError:
+                matching_keys = []
+            if not matching_keys:
+                matching_keys = normalized_keys.get(_normalize_label(label), [])
+            if len(matching_keys) != 1:
+                return (
+                    None,
+                    "output_adjustment_roles do not provide one unambiguous role "
+                    f"for component {label!r}",
+                )
+            resolved.append(roles[matching_keys[0]])
+    elif isinstance(roles, Sequence) and not isinstance(roles, (str, bytes)):
+        resolved = list(roles)
+        if len(resolved) != component_count:
+            return (
+                None,
+                "output_adjustment_roles must contain one role per adjustment component",
+            )
+    else:
+        return (
+            None,
+            "output_adjustment_roles must be a mapping or a one-dimensional sequence",
+        )
+
+    if any(not isinstance(role, str) or role not in _OUTPUT_ADJUSTMENT_ROLES for role in resolved):
+        return (
+            None,
+            "output_adjustment_roles must use only 'inflow', 'outflow', or 'other'",
+        )
+    return tuple(resolved), None
+
+
+def _output_adjustment_trade_conflict(
+    io: Any,
+    value: Any,
+    *,
+    roles: Any = None,
+) -> str | None:
     """Reject ambiguous overlap between output adjustments and trade flows."""
 
     trade = getattr(io, "trade", None)
     if trade is None or not trade.has_any or value is None:
         return None
-    labels = _output_adjustment_component_labels(value)
-    if labels is None:
+    resolved_roles, roles_reason = _resolve_output_adjustment_roles(value, roles)
+    if roles_reason:
+        return roles_reason
+    try:
+        shape = _shape_of(value)
+    except Exception:
+        shape = ()
+    if len(shape) != 2:
         return (
             "output_adjustments were supplied with TradeFlows but their "
-            "component labels are unavailable; possible trade double-counting "
+            "component roles are unavailable; possible trade double-counting "
             "cannot be ruled out"
         )
-    from .structure import _normalize_label
-
-    normalized = {_normalize_label(label) for label in labels}
-    overlaps = sorted(normalized & _OUTPUT_TRADE_LABELS)
-    if overlaps:
+    if resolved_roles is None:
+        labels = _output_adjustment_component_labels(value)
+        if labels:
+            normalized = {_normalize_label(label) for label in labels}
+            overlaps = sorted(normalized & _OUTPUT_TRADE_LABELS)
+            if overlaps:
+                return (
+                    "output_adjustments overlap with declared trade component(s): "
+                    + ", ".join(overlaps)
+                )
         return (
-            "output_adjustments overlap with declared trade component(s): "
-            + ", ".join(overlaps)
+            "output_adjustment_roles must explicitly classify every two-dimensional "
+            "output_adjustments component when TradeFlows are supplied"
+        )
+    if any(role in {"inflow", "outflow"} for role in resolved_roles):
+        return (
+            "output_adjustment_roles declares trade-related components; "
+            "use either TradeFlows or output_adjustments for those flows, not both"
         )
     return None
 
@@ -430,6 +527,7 @@ def compile_accounting_plan(
         components=components,
     )
     output_adjustment_raw = getattr(io, "output_adjustments", None)
+    output_adjustment_roles = getattr(io, "output_adjustment_roles", None)
     if _has_component_risk(components, "output_adjustments"):
         plan.output_adjustment = None
         output_adjustment_reason = (
@@ -446,8 +544,18 @@ def compile_accounting_plan(
     if output_note:
         plan.notes.append(output_note)
     if output_adjustment_raw is not None:
+        _resolved_roles, roles_reason = _resolve_output_adjustment_roles(
+            output_adjustment_raw,
+            output_adjustment_roles,
+        )
+        if roles_reason:
+            plan.output_adjustment = None
+            output_adjustment_reason = roles_reason
+            plan.notes.append(roles_reason)
         conflict_reason = _output_adjustment_trade_conflict(
-            io, output_adjustment_raw
+            io,
+            output_adjustment_raw,
+            roles=output_adjustment_roles,
         )
         if conflict_reason:
             plan.output_adjustment = None

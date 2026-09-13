@@ -114,6 +114,9 @@ def input_hash(io: Any) -> str:
         "L_reference": _canonical(getattr(io, "L_reference", None)),
         "input_adjustments": _canonical(getattr(io, "input_adjustments", None)),
         "output_adjustments": _canonical(getattr(io, "output_adjustments", None)),
+        "output_adjustment_roles": _canonical(
+            getattr(io, "output_adjustment_roles", None)
+        ),
         "trade": trade_payload,
         "metadata": _canonical(getattr(io, "metadata", None)),
         "accounting": _canonical(

@@ -127,7 +127,7 @@ def audit(
     )
     if components.double_count_risk:
         warnings.append(
-            "Y/V subtotal components may be double-counted; inspect report.components.subtotal_candidates"
+            "subtotal components may be double-counted; inspect report.components.subtotal_candidates"
         )
     if getattr(components, "component_label_risks", []):
         warnings.append(

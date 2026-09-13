@@ -40,6 +40,7 @@ def test_v01_public_exports_and_input_contract_are_present():
         "trade",
         "input_adjustments",
         "output_adjustments",
+        "output_adjustment_roles",
         "A_reference",
         "L_reference",
         "metadata",
